@@ -1,0 +1,41 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      // `.claude/hooks/**/*.mjs` は対象にしない。hook は Claude Code が .claude/settings.json から
+      // 文字列パスで起動するため import グラフに載らず、全ファイルが未使用と報告されてしまう
+      "project": ["eslint-rules/**/*.mjs", "scripts/**/*.mjs"]
+    },
+    "samples/infra": {
+      "entry": [
+        "bin/app.ts",
+        // Lambda ハンドラは CDK が実行時に文字列パス(entry: path.join(...))で参照するため、
+        // import グラフから辿れない。明示的に entry として登録する
+        "lib/lambda/**/index.ts",
+        "test/**/*.test.ts"
+      ],
+      "project": ["**/*.ts"],
+      // tsx: cdk.json の "app": "npx tsx bin/app.ts" で CDK アプリ実行に使用（コードからは import しない）
+      // esbuild: NodejsFunction のバンドルで aws-cdk-lib が内部起動する（コードからは import しない）
+      "ignoreDependencies": ["tsx", "esbuild"]
+    },
+    "samples/app/backend": {
+      "entry": ["main.ts", "test/**/*.test.ts"],
+      "project": ["**/*.ts"]
+    },
+    "app/backend": {
+      "entry": ["test/**/*.test.ts"],
+      "project": ["**/*.ts"],
+      // esbuild: CDK が Lambda のバンドルをこのディレクトリの依存で実行する（コードからは import しない）
+      // （infra/lib/stack/appStack.ts の depsLockFilePath でこのディレクトリを指定）
+      "ignoreDependencies": ["esbuild"]
+    },
+    "infra": {
+      "entry": ["bin/app.ts", "test/**/*.test.ts"],
+      "project": ["**/*.ts"],
+      // tsx: cdk.json の "app": "npx tsx bin/app.ts" で CDK アプリ実行に使用（コードからは import しない）
+      // esbuild: NodejsFunction のバンドルで aws-cdk-lib が内部起動する（コードからは import しない）
+      "ignoreDependencies": ["tsx", "esbuild"]
+    }
+  }
+}

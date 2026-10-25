@@ -1,0 +1,68 @@
+# 責務: コスト節約のため、dev 環境のスタックをスケジュールで削除する。
+# この設計では main へマージすれば dev 環境が自動で作り直されるため、削除しっぱなしでも困らない。
+
+name: dev-destroy
+run-name: dev-destroy (${{ github.ref_name }})
+
+on:
+  # schedule:
+  #   - cron: '00 4,14 * * *'
+  workflow_dispatch:
+    inputs:
+      stack:
+        type: choice
+        description: target stack
+        default: pdd-dev-*
+        options:
+          - pdd-dev-*
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # dev を使う者は全員このグループで直列化する（理由は samples/docs/design/cicd-design.md「dev を触るものは、削除も含めて同じ直列化グループに入れる」）。
+    # グループ名は deploy-dev.yml の cdk-deploy と完全一致させること。別名にすると直列化が効かず、
+    # destroy と deploy が並行する。
+    concurrency:
+      group: cdk-deploy-dev
+      cancel-in-progress: false
+    environment:
+      name: dev
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      ENV_NAME: ${{ vars.ENV_NAME }}
+      # parameter.ts が読むのは process.env.ACCOUNT_ID
+      ACCOUNT_ID: ${{ secrets.DEV_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
+        with:
+          role-to-assume: ${{ secrets.ROLE_TO_ASSUME }}
+          aws-region: ap-northeast-1
+      - run: aws sts get-caller-identity
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      # cdk コマンドは infra/ の依存にしか存在しない
+      - run: npm ci
+        working-directory: infra
+
+      # destroy 対象は devParameter.prefix（infra/parameter.ts）由来のスタック名で選ぶ。
+      # bin/app.ts は dev/stg/prd の3環境すべてを synth するため、対象の絞り込みが要る。
+      - run: npx cdk destroy -f "$STACK_NAME"
+        working-directory: infra
+        env:
+          STACK_NAME: ${{ github.event.inputs.stack || 'pdd-dev-*' }}

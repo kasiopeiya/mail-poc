@@ -1,0 +1,175 @@
+// 責務: bashコマンド文字列から「gh の編集系サブコマンドが既存の本文を空で上書きする呼び出し」を
+// 検出する純粋関数のみを担う。
+//
+// 設計意図（WHY）:
+// - GitHub は Issue / PR 本文の版を UI から戻せない。空で上書きすると、復元できるかどうかが
+//   その場の記憶に懸かる。取り返しがつかない操作なので、実行前に止める。
+// - 対象は既存の本文を「置き換える」コマンドだけ。create 系や `--edit-last` の無い comment は
+//   新規作成であり、空でも失われるものが無いため対象外。
+// - `--body-file -`（標準入力）は、同じステートメントに書かれたヒアドキュメントの中身まで見て
+//   空かどうかを判定する。中身のあるヒアドキュメント・パイプ・リダイレクトは通常の更新なので通す。
+//   ヒアドキュメントが複数あるときは書かれた順で対応づける。別のステートメントのものは見ない。
+// - シェルの厳密なパース（サブシェル・変数展開）はしない。判定できない入力は通す
+//   （fail-open）。ただし標準入力の供給元が1つも見当たらない `--body-file -` だけは、
+//   空本文の書き込みが確定するので止める。
+// - コマンドの分割は shellSplit.mjs に委ね、引用符の内側は区切らない（本文中の `;` や `|` で
+//   コマンドの区切りを誤らないため）。
+// - 語頭は位置で読むので、読む前に正規化する（ラッパー・グローバルオプションを剥がす）。
+//   剥がさないと `env gh issue edit 1 --body ""`・`gh --repo o/r issue edit 1 --body ""` で
+//   判定をすり抜けられる。
+
+import {
+  countHeredocOperators,
+  normalizeCommandStart,
+  splitHeredoc,
+  splitPipeStages,
+  splitStatements,
+  stripQuotes,
+  tokenize
+} from './shellSplit.mjs'
+
+// 既存の本文を置き換えるコマンドと、そこで本文を空にできるフラグ（gh 2.87 時点）。
+const OVERWRITE_TARGETS = [
+  {
+    subcommand: ['issue', 'edit'],
+    label: 'gh issue edit',
+    bodyFlags: ['-b', '--body'],
+    bodyFileFlags: ['-F', '--body-file']
+  },
+  {
+    subcommand: ['pr', 'edit'],
+    label: 'gh pr edit',
+    bodyFlags: ['-b', '--body'],
+    bodyFileFlags: ['-F', '--body-file']
+  },
+  {
+    subcommand: ['release', 'edit'],
+    label: 'gh release edit',
+    bodyFlags: ['-n', '--notes'],
+    bodyFileFlags: ['-F', '--notes-file']
+  },
+  {
+    subcommand: ['issue', 'comment'],
+    label: 'gh issue comment --edit-last',
+    requiredFlag: '--edit-last',
+    bodyFlags: ['-b', '--body'],
+    bodyFileFlags: ['-F', '--body-file']
+  },
+  {
+    subcommand: ['pr', 'comment'],
+    label: 'gh pr comment --edit-last',
+    requiredFlag: '--edit-last',
+    bodyFlags: ['-b', '--body'],
+    bodyFileFlags: ['-F', '--body-file']
+  }
+]
+
+// `<` は入力リダイレクト、`<<<` はヒアストリング。どちらも標準入力に中身を与えるので通す。
+// `<<`（ヒアドキュメント）だけは中身が空かどうかまで見るため、ここでは扱わない。
+function hasInputRedirect(stage) {
+  if (stage.includes('<<<')) return true
+  return /(^|[^<])<(?!<)/.test(stage)
+}
+
+function* iterateFlagValues(tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (!token.startsWith('-')) continue
+
+    const equalIndex = token.indexOf('=')
+    if (equalIndex !== -1) {
+      yield [token.slice(0, equalIndex), token.slice(equalIndex + 1)]
+      continue
+    }
+    yield [token, tokens[i + 1]]
+  }
+}
+
+function findTarget(tokens) {
+  if (tokens[0] !== 'gh') return null
+  return (
+    OVERWRITE_TARGETS.find(
+      ({ subcommand }) => subcommand[0] === tokens[1] && subcommand[1] === tokens[2]
+    ) ?? null
+  )
+}
+
+/**
+ * `--body-file -` に渡る標準入力が空だと言い切れる場合だけ、その理由を返す。
+ * 中身を静的に確かめられない供給元（パイプ・リダイレクト）は null を返して通す。
+ */
+function judgeEmptyStdin({ heredocBody, hasPipedStdin, hasRedirectedStdin }) {
+  if (heredocBody !== null) {
+    return heredocBody.trim() === '' ? 'ヒアドキュメントが空' : null
+  }
+  if (hasPipedStdin || hasRedirectedStdin) return null
+  return '標準入力の供給元が無い'
+}
+
+/** フラグ1つ分を見て、本文を空で渡していればその説明を返す。該当しなければ null。 */
+function judgeFlagValue(target, { flag, flagValue, stdin }) {
+  if (target.bodyFlags.includes(flag) && stripQuotes(flagValue) === '') {
+    return `${target.label} が ${flag} に空文字列を渡している`
+  }
+  if (!target.bodyFileFlags.includes(flag) || stripQuotes(flagValue) !== '-') return null
+
+  const reason = judgeEmptyStdin(stdin)
+  return reason ? `${target.label} が ${flag} - に空の本文を渡している（${reason}）` : null
+}
+
+function inspectTarget(target, tokens, stdin) {
+  const flagTokens = tokens.slice(3)
+  if (target.requiredFlag && !flagTokens.includes(target.requiredFlag)) return null
+
+  for (const [flag, flagValue] of iterateFlagValues(flagTokens)) {
+    if (flagValue === undefined) continue
+
+    const violation = judgeFlagValue(target, { flag, flagValue, stdin })
+    if (violation) return violation
+  }
+  return null
+}
+
+/** パイプで繋がった各段を順に検査し、違反があればその説明を返す。該当しなければ null。 */
+function inspectStatement(statement, heredocBody) {
+  for (const [index, stage] of splitPipeStages(statement).entries()) {
+    // `env` や `gh --repo o/r` を剥がし、サブコマンドを位置で読めるようにする
+    const tokens = normalizeCommandStart(tokenize(stage))
+    const target = findTarget(tokens)
+    if (!target) continue
+
+    const violation = inspectTarget(target, tokens, {
+      heredocBody,
+      hasPipedStdin: index > 0,
+      hasRedirectedStdin: hasInputRedirect(stage)
+    })
+    if (violation) return `${violation}: ${stage.trim()}`
+  }
+  return null
+}
+
+/**
+ * bashコマンド文字列を検査し、既存の本文を空で上書きする gh 呼び出しがあれば
+ * その説明文字列を返す。該当しなければ null。
+ *
+ * @param {string} command
+ * @returns {string | null}
+ */
+export function detectEmptyGhBodyOverwrite(command) {
+  if (typeof command !== 'string' || command.trim() === '') return null
+
+  const { commandText, heredocBodies } = splitHeredoc(command)
+  let heredocIndex = 0
+
+  for (const statement of splitStatements(commandText)) {
+    // ヒアドキュメントの中身は書かれた順に並ぶので、演算子を数えた順番で対応づける
+    const operatorCount = countHeredocOperators(statement)
+    const statementHeredocBody = operatorCount === 0 ? null : (heredocBodies[heredocIndex] ?? null)
+    heredocIndex += operatorCount
+
+    const violation = inspectStatement(statement, statementHeredocBody)
+    if (violation) return violation
+  }
+
+  return null
+}

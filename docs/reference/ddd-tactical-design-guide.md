@@ -1,0 +1,16 @@
+# DDD 戦術的設計ガイド
+
+## 対象読者
+
+ドメインモデルを設計／実装する AI が、DDD の戦術的設計パターンを具体的にどう書くか知りたいとき。
+
+## 目的
+
+DDD の戦術的設計（エンティティ・値オブジェクト・集約・リポジトリなど）のノウハウをまとめ、ドメインモデルを実装する際の手引きとする。判断基準（良い設計とは何か）は [application-design-policy](../policy/application-design-policy.md) に従い、本ガイドは「具体的にどう実装するか」の手順・例に集中する。
+
+> [!IMPORTANT]
+> **（AI・必須）** DDD の教科書的解説の書き写しはしない（限界費用が高く負債になる）。理論は書籍に委ね、本ガイドは「このプロジェクトでどう実装・レビューするか」の手引きに絞る。
+
+## 関連
+
+- [application-architecture-policy](../policy/application-architecture-policy.md)：マクロ構造の判断基準

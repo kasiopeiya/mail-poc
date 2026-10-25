@@ -1,0 +1,41 @@
+{
+  "name": "root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "check:static": "npm run lint && npm run knip && (cd samples/app/backend && npm run typecheck) && (cd samples/infra && npm run typecheck)",
+    "check:links": "node scripts/ci/check-markdown-links.mjs",
+    "check:claude-md": "node scripts/ci/check-claude-md-size.mjs",
+    "check:rules": "node scripts/ci/check-rule-size.mjs",
+    "check:workflows": "node scripts/ci/check-workflow-pins-and-permissions.mjs",
+    "check:audit": "node scripts/ci/audit-dependencies.mjs",
+    "test:hooks": "node --test .claude/hooks/policyMatcher.test.mjs .claude/hooks/policy-loader.test.mjs",
+    "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
+    "auto-programmer": "node scripts/auto-programmer/index.mjs",
+    "close-issues": "node scripts/close-issues.mjs",
+    "move-issue-card": "node scripts/move-issue-card.mjs",
+    "prune-merged-branches-and-worktrees": "node scripts/prune-branches.mjs",
+    "count-registered-sessions": "node scripts/count-registered-worktree-sessions.mjs",
+    "gen:adr-index": "node scripts/generate-adr-index.mjs",
+    "knip": "knip",
+    "knip:fix": "knip --fix"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.8.0",
+    "eslint-plugin-import-x": "^4.17.1",
+    "eslint-plugin-sonarjs": "^4.1.0",
+    "globals": "^17.7.0",
+    "knip": "^6.26.0",
+    "prettier": "^3.4.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.63.0"
+  }
+}
