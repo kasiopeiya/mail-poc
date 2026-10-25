@@ -6,7 +6,7 @@
 import { homedir } from 'node:os'
 import { basename, isAbsolute, resolve } from 'node:path'
 
-const repository = 'kasiopeiya/claude-dev-template'
+const repository = 'kasiopeiya/mail-poc'
 
 // AI 専用 clone・実行ログ・clone の番号ロック（locks/）の置き場。人間の作業ツリーと別の場所であれば、どこでもよい。
 // 置き場だけを変えたい人が追跡対象のこのファイルを編集せずに済むよう、環境変数で上書きできる
@@ -24,13 +24,13 @@ export const config = {
   board: {
     // GitHub Projects（v2）の持ち主と番号。`gh project list --owner <owner>` で調べる
     owner: 'kasiopeiya',
-    number: 2,
+    number: 3,
     // ボード上の表記。`gh project field-list <番号> --owner <owner>` の表示と一字一句合わせる
     statusFieldName: 'Status',
     // 積まれただけで、まだ着手待ちにしていないことを表す選択肢
     todoStatusName: 'Todo',
     readyStatusName: 'Ready',
-    inProgressStatusName: 'In progress'
+    inProgressStatusName: 'In Progress'
     // レビュー待ちの選択肢は持たない。カードをそこへ動かすのはボードの組み込みワークフローで、このツールは触らない
   },
 
@@ -44,7 +44,7 @@ export const config = {
   branchPrefix: '',
 
   // claude セッション1回（Skill 1つぶん）を打ち切るまでの時間。無人で固まったまま止まらない事態を防ぐ
-  sessionTimeoutMinutes: 60,
+  sessionTimeoutMinutes: 80,
 
   // 着手できる Issue が無かったとき、ボードを見直すまで待つ時間（90秒）。短いほど gh project の呼び出し
   // 頻度が上がり、GitHub API のレートリミットに達しやすくなる
