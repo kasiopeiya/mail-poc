@@ -41,7 +41,7 @@ jobs:
       # OIDC で AWS へ認証するために必要（下の AWS 認証ステップと対）
       # id-token: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # AWS アカウント・OIDC ロール・secrets.ROLE_TO_ASSUME が無いため、認証ステップが必ず落ちる。
       # infra/ も無いため、その依存を要る setup-node と npm ci も同じく動かせない。
