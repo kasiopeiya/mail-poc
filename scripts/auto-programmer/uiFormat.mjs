@@ -1,8 +1,8 @@
-// 責務: 画面へ出す1行を組み立てる純粋関数だけを置く。端末への書き出しと色付けは ui.mjs が持つ。
+// 責務: 画面へ出す1行や、例外の表示用文字列を組み立てる純粋関数だけを置く。端末への書き出しと色付けは ui.mjs が持つ。
 //
 // 設計意図（WHY）:
 // - import を1つも持たない形に保つ。時刻の整形・所要時間の言い回し・行の組み立ては、端末もプロセスも
-//   要らずに確かめられる。auto-programmer でテストを書くのはこの形のファイルだけである（unit-test-policy）。
+//   要らずに確かめられる。
 // - 複数行のメッセージは行ごとに分けて返す。外部コマンドの標準エラー出力をそのまま載せると、時刻も
 //   レベル記号も無い行が画面に混じり、どこからが1件の話なのかを人間が追えなくなる。
 // - 子プロセスの出力は、各行の頭に時刻の幅だけ空けた罫線を差し込む。自前の行と同じ見た目で混ざると、
@@ -17,11 +17,14 @@ const MILLISECONDS_PER_SECOND = 1000
 const SECONDS_PER_MINUTE = 60
 const MINUTES_PER_HOUR = 60
 
+// 自前の行の「時刻 記号 内容」を区切る文字
+const LINE_PART_SEPARATOR = ' '
+
 // formatClockTime が返す `HH:MM:SS` の幅
 const CLOCK_TIME_WIDTH = formatClockTime(new Date(0)).length
 
-// 子プロセスの出力の各行頭に差し込む印。時刻と空白の幅だけ空け、自前の行のレベル記号と同じ桁に罫線を置く
-export const CHILD_OUTPUT_GUTTER = `${' '.repeat(CLOCK_TIME_WIDTH + 1)}│ `
+// 子プロセスの出力の各行頭に差し込む印。時刻と区切りの幅だけ空け、自前の行のレベル記号と同じ桁に罫線を置く
+export const CHILD_OUTPUT_GUTTER = `${' '.repeat(CLOCK_TIME_WIDTH + LINE_PART_SEPARATOR.length)}│ `
 
 const LINE_FEED_BYTE = 0x0a
 
@@ -62,10 +65,11 @@ const MAX_SINGLE_LINE_LENGTH = 200
 const SINGLE_LINE_HEAD_LENGTH = 60
 
 // 端末の制御文字（CR・ESC など）。混じると行頭へ戻る・カーソルを動かすなどして、先頭に付けた時刻と
-// レベル記号を上書き・消去できてしまう。タブと改行は含めない（改行は行の区切りとして先に分ける）。
+// レベル記号を上書き・消去できてしまう。\u0080-\u009F（C1。\u009B は ESC [ と同じ働きをする）も、ESC を落としただけでは
+// 迂回されるので含める。タブと改行は含めない（改行は行の区切りとして先に分ける）。
 // no-control-regex は制御文字の書き忘れ・打ち間違いを拾う規則で、ここは落とす対象として意図的に並べている
 // eslint-disable-next-line no-control-regex
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000B-\u001F\u007F]/g
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g
 
 /**
  * 時刻を `HH:MM:SS` にする（実行しているマシンのローカル時刻）。
@@ -132,9 +136,8 @@ function formatMinutesSeconds(milliseconds) {
 export function buildMessageLines({ clockTime, symbol, message, styleLineText = (text) => text }) {
   return String(message)
     .split('\n')
-    .map(
-      (line) =>
-        `${clockTime} ${symbol} ${styleLineText(line.replace(CONTROL_CHARACTER_PATTERN, ''))}`
+    .map((line) =>
+      joinLineParts({ clockTime, symbol, text: styleLineText(stripControlCharacters(line)) })
     )
 }
 
@@ -147,7 +150,27 @@ export function buildMessageLines({ clockTime, symbol, message, styleLineText = 
  */
 export function buildStatusLineText({ clockTime, symbol, message }) {
   const singleLineMessage = String(message).replace(/\n/g, ' ')
-  return `${clockTime} ${symbol} ${singleLineMessage.replace(CONTROL_CHARACTER_PATTERN, '')}`
+  return joinLineParts({ clockTime, symbol, text: stripControlCharacters(singleLineMessage) })
+}
+
+/**
+ * 端末の制御文字を落とす。
+ *
+ * @param {string} text 落とす対象の文字列
+ * @returns {string} 制御文字（タブと改行を除く）を落とした文字列
+ */
+function stripControlCharacters(text) {
+  return text.replace(CONTROL_CHARACTER_PATTERN, '')
+}
+
+/**
+ * 自前の1行を「時刻 記号 内容」の形につなぐ。子プロセスの出力の罫線（CHILD_OUTPUT_GUTTER）は、この形の桁に合わせてある。
+ *
+ * @param {{ clockTime: string, symbol: string, text: string }} params 時刻・レベル記号・内容
+ * @returns {string} `時刻 記号 内容`
+ */
+function joinLineParts({ clockTime, symbol, text }) {
+  return [clockTime, symbol, text].join(LINE_PART_SEPARATOR)
 }
 
 /**
@@ -282,4 +305,26 @@ export function collapseToSingleLine(text) {
 
   const tailLength = MAX_SINGLE_LINE_LENGTH - SINGLE_LINE_HEAD_LENGTH
   return `${collapsed.slice(0, SINGLE_LINE_HEAD_LENGTH)}…${collapsed.slice(-tailLength)}`
+}
+
+/**
+ * 例外を、メッセージだけの表示用文字列にする。
+ *
+ * @param {unknown} error 受け取った例外
+ * @returns {string} 表示する文字列
+ */
+export function formatErrorMessage(error) {
+  if (!(error instanceof Error)) return String(error)
+  return error.message
+}
+
+/**
+ * 予期しない例外を、stack まで含む表示用の文字列にする。
+ *
+ * @param {unknown} error 受け取った例外
+ * @returns {string} 表示する文字列（stack が無ければメッセージ）
+ */
+export function formatErrorWithStack(error) {
+  if (!(error instanceof Error)) return String(error)
+  return error.stack ?? error.message
 }

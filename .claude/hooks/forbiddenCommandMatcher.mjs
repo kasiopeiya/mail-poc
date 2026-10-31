@@ -12,7 +12,7 @@
 //   reflog（.git/logs/refs/heads/<branch>）を一緒に消し、未マージの作業の復元手段が残らないため。禁止を
 //   デフォルトブランチだけに絞ると、守る対象（ローカルのデフォルトブランチ）より失う対象（未マージの
 //   ブランチ）の方が大きい。
-//   掃除は scripts/prune-branches.mjs が `-d` だけで行う。
+//   掃除は scripts/prune-merged-branches-and-worktrees.mjs が `-d` だけで行う。
 // - 判定はコマンドの語頭に立つトークンだけを見る。引用符の中とヒアドキュメントの中身は実行されない
 //   文字列なので、shellSplit.mjs の段階で判定対象から外れる（Issue #396）。
 // - シェルの厳密なパースはしない。判定できない入力は通す（fail-open）。完全な安全機構ではなく、
@@ -232,6 +232,38 @@ const FORBIDDEN_COMMANDS = RULE_GROUPS.flatMap(({ category, why, rules }) =>
   // グループの why は既定値。ルール側に why があればそちらを使う
   rules.map((rule) => ({ category, why, ...rule }))
 )
+
+/**
+ * bashコマンド文字列を検査し、禁止コマンドに該当すればその説明文字列を返す。該当しなければ null。
+ *
+ * @param {string} command bashコマンド文字列
+ * @param {{ projectDir?: string, readDefaultBranchName?: () => string | undefined }} [options]
+ *   `projectDir` はプロジェクトルートの絶対パス（削除先がプロジェクト外かの判定に使う。既定は実行時の作業ディレクトリ）。
+ *   `readDefaultBranchName` はデフォルトブランチ名を返す関数で、ブランチ削除のときだけ呼ぶ。
+ *   省略したとき・undefined を返すときは、`main`・`master` だけを守る
+ * @returns {string | null} 該当したルールの説明。該当しなければ null
+ */
+export function detectForbiddenCommand(
+  command,
+  { projectDir = process.cwd(), readDefaultBranchName } = {}
+) {
+  if (typeof command !== 'string' || command.trim() === '') return null
+
+  for (const rule of FORBIDDEN_COMMANDS) {
+    const detail = rule.detectWholeCommand?.(command)
+    if (detail) return describeViolation(rule, detail)
+  }
+
+  const { commandText } = splitHeredoc(command)
+  const stages = splitStatements(commandText).flatMap(splitPipeStages)
+
+  for (const stage of stages) {
+    const violation = detectInStage(stage, { projectDir, readDefaultBranchName })
+    if (violation) return violation
+  }
+
+  return null
+}
 
 function hasPrefix(tokens, prefix) {
   return prefix.every((expected, index) => tokens[index] === expected)
@@ -514,37 +546,5 @@ function detectInStage(stage, { projectDir, readDefaultBranchName }) {
     if (rule.detectWholeCommand) continue
     if (matchesRule(rule, tokens, context)) return describeViolation(rule, stage)
   }
-  return null
-}
-
-/**
- * bashコマンド文字列を検査し、禁止コマンドに該当すればその説明文字列を返す。該当しなければ null。
- *
- * @param {string} command bashコマンド文字列
- * @param {{ projectDir?: string, readDefaultBranchName?: () => string | undefined }} [options]
- *   `projectDir` はプロジェクトルートの絶対パス（削除先がプロジェクト外かの判定に使う。既定は実行時の作業ディレクトリ）。
- *   `readDefaultBranchName` はデフォルトブランチ名を返す関数で、ブランチ削除のときだけ呼ぶ。
- *   省略したとき・undefined を返すときは、`main`・`master` だけを守る
- * @returns {string | null} 該当したルールの説明。該当しなければ null
- */
-export function detectForbiddenCommand(
-  command,
-  { projectDir = process.cwd(), readDefaultBranchName } = {}
-) {
-  if (typeof command !== 'string' || command.trim() === '') return null
-
-  for (const rule of FORBIDDEN_COMMANDS) {
-    const detail = rule.detectWholeCommand?.(command)
-    if (detail) return describeViolation(rule, detail)
-  }
-
-  const { commandText } = splitHeredoc(command)
-  const stages = splitStatements(commandText).flatMap(splitPipeStages)
-
-  for (const stage of stages) {
-    const violation = detectInStage(stage, { projectDir, readDefaultBranchName })
-    if (violation) return violation
-  }
-
   return null
 }

@@ -53,80 +53,6 @@ let activeStatusLine = null
 const midLineRelayedStreamNames = new Set()
 
 /**
- * メッセージを1行以上の行にして書き出す。改行を含むメッセージも、行ごとに時刻とレベル記号が付く。
- *
- * @param {'info' | 'banner' | 'success' | 'warning' | 'error' | 'status'} kind 行の種類
- * @param {string} message 出す内容
- * @returns {void}
- */
-function writeLines(kind, message) {
-  clearStatusLine()
-  closeRelayedOutputLines()
-  const { symbol, symbolStyle, textStyle, stream } = LINE_STYLES[kind]
-  const lines = buildMessageLines({
-    ...buildStyledLinePrefix({ symbol, symbolStyle, stream }),
-    message,
-    styleLineText: textStyle ? (text) => styleText(textStyle, text, { stream }) : undefined
-  })
-  for (const line of lines) stream.write(`${line}\n`)
-}
-
-/**
- * 行頭の時刻とレベル記号に色を付ける。時刻は薄く、レベル記号は種類の色にする。
- *
- * @param {{ symbol: string, symbolStyle: string, stream: NodeJS.WriteStream }} params レベル記号・その書式・書き出す先（色を付けてよいかの判定に使う）
- * @returns {{ clockTime: string, symbol: string }} 色を付けた時刻とレベル記号
- */
-function buildStyledLinePrefix({ symbol, symbolStyle, stream }) {
-  return {
-    clockTime: styleText('dim', formatClockTime(new Date()), { stream }),
-    symbol: styleText(symbolStyle, symbol, { stream })
-  }
-}
-
-/**
- * 標準出力が人間の対話的な端末に直接出ているか。`tee`・ファイルへのリダイレクト・CI のログでは false。
- * ステータス行をその場更新してよいかの判定に使う。
- *
- * @returns {boolean} true なら TTY
- */
-function isStdoutInteractiveTerminal() {
-  return STATUS_LINE_STREAM.isTTY === true
-}
-
-/**
- * TTY でその場更新中のステータス行があれば消す。書く前に必ずこれを呼ぶ。
- *
- * @returns {void}
- */
-function clearStatusLine() {
-  if (activeStatusLine === null) return
-  STATUS_LINE_STREAM.write(ERASE_CURRENT_LINE)
-  activeStatusLine = null
-}
-
-/**
- * 中継した子の出力が行の途中で終わっているストリームへ改行を足し、次の行を行頭から書けるようにする。
- *
- * @returns {void}
- */
-function closeRelayedOutputLines() {
-  for (const streamName of midLineRelayedStreamNames) process[streamName].write('\n')
-  midLineRelayedStreamNames.clear()
-}
-
-/**
- * ステータス行を書く端末で、中継した子の出力が行の途中になっているか。stderr は TTY のときだけ、
- * ステータス行と同じ端末に出ているとみなす。
- *
- * @returns {boolean} true なら行の途中
- */
-function isStatusLineTerminalMidLine() {
-  if (midLineRelayedStreamNames.has('stdout')) return true
-  return midLineRelayedStreamNames.has('stderr') && process.stderr.isTTY === true
-}
-
-/**
  * 待っている間の状況を出す。TTY ではその場を書き換え（中継した子の出力が行の途中で終わっているときは
  * 何も出さない）、非TTY では時刻・レベル記号付きの1行として追記する（追記だけになる非TTY では、
  * この行自体が生存確認を兼ねる）。
@@ -184,22 +110,6 @@ export function relayChildProcessOutput(streamName, chunk) {
 }
 
 /**
- * 同じ端末に出ている他方のストリームへ中継した子の出力が行の途中なら、改行を足して閉じる。
- * 閉じないと、こちらのストリームの罫線が画面上の行の途中に入り、他方の続きは行頭なのに罫線を欠く。
- * 同じ端末かは、stdout と stderr がどちらも TTY かで判定する（`2>&1` でファイルへ流したときは見分けられない）。
- *
- * @param {'stdout' | 'stderr'} streamName これから中継するストリームの名前
- * @returns {void}
- */
-function closeOtherRelayedStreamOnSharedTerminal(streamName) {
-  const otherStreamName = streamName === 'stdout' ? 'stderr' : 'stdout'
-  if (!midLineRelayedStreamNames.has(otherStreamName)) return
-  if (process.stdout.isTTY !== true || process.stderr.isTTY !== true) return
-  process[otherStreamName].write('\n')
-  midLineRelayedStreamNames.delete(otherStreamName)
-}
-
-/**
  * 間引いて追記するステータス行を作る。TTY は呼ばれるたびに showStatusLine へ渡し、非TTY は `minAppendIntervalMs`
  * 未満の間隔では追記しない（間引かないと、ポーリング間隔の短い場面でログが溢れる）。
  * 呼ぶたびに新しい間引き区間を始めたい場面（CI の run を待つループなど）では、呼び出し側で
@@ -208,10 +118,10 @@ function closeOtherRelayedStreamOnSharedTerminal(streamName) {
  * TTY のその場更新だけ見た目を変えたいときは、`liveMessage` と `symbol` を渡す（非TTY の追記は `message` のまま）。
  * プログレスバーのような毎秒変わる見た目を、追記するログに残さないため。
  *
- * @param {{ minAppendIntervalMs?: number }} [params] 非TTY で追記する最小間隔（省略時は毎回追記する）
+ * @param {{ minAppendIntervalMs: number }} params 非TTY で追記する最小間隔（0 なら毎回追記する）
  * @returns {(message: string, liveOptions?: { liveMessage?: string, symbol?: string }) => void} 呼ぶたびに状況を出す関数
  */
-export function createThrottledStatusLine({ minAppendIntervalMs = 0 } = {}) {
+export function createThrottledStatusLine({ minAppendIntervalMs }) {
   let lastAppendedAt = 0
   return (message, { liveMessage = message, symbol } = {}) => {
     if (isStdoutInteractiveTerminal()) {
@@ -277,4 +187,102 @@ export function showIssueBanner({ issueNumber, title, branchName, workspaceDir }
   closeRelayedOutputLines()
   LINE_STYLES.banner.stream.write('\n')
   writeLines('banner', buildIssueBannerText({ issueNumber, title, branchName, workspaceDir }))
+}
+
+/**
+ * メッセージを1行以上の行にして書き出す。改行を含むメッセージも、行ごとに時刻とレベル記号が付く。
+ *
+ * @param {'info' | 'banner' | 'success' | 'warning' | 'error' | 'status'} kind 行の種類
+ * @param {string} message 出す内容
+ * @returns {void}
+ */
+function writeLines(kind, message) {
+  clearStatusLine()
+  closeRelayedOutputLines()
+  const { symbol, symbolStyle, textStyle, stream } = LINE_STYLES[kind]
+  const lines = buildMessageLines({
+    ...buildStyledLinePrefix({ symbol, symbolStyle, stream }),
+    message,
+    styleLineText: textStyle ? (text) => styleText(textStyle, text, { stream }) : undefined
+  })
+  for (const line of lines) stream.write(`${line}\n`)
+}
+
+/**
+ * 行頭の時刻とレベル記号に色を付ける。時刻は薄く、レベル記号は種類の色にする。
+ *
+ * @param {{ symbol: string, symbolStyle: string, stream: NodeJS.WriteStream }} params レベル記号・その書式・書き出す先（色を付けてよいかの判定に使う）
+ * @returns {{ clockTime: string, symbol: string }} 色を付けた時刻とレベル記号
+ */
+function buildStyledLinePrefix({ symbol, symbolStyle, stream }) {
+  return {
+    clockTime: styleText('dim', formatClockTime(new Date()), { stream }),
+    symbol: styleText(symbolStyle, symbol, { stream })
+  }
+}
+
+/**
+ * 標準出力が人間の対話的な端末に直接出ているか。`tee`・ファイルへのリダイレクト・CI のログでは false。
+ * ステータス行をその場更新してよいかの判定に使う。
+ *
+ * @returns {boolean} true なら TTY
+ */
+function isStdoutInteractiveTerminal() {
+  return STATUS_LINE_STREAM.isTTY === true
+}
+
+/**
+ * TTY でその場更新中のステータス行があれば消す。書く前に必ずこれを呼ぶ。
+ *
+ * @returns {void}
+ */
+function clearStatusLine() {
+  if (activeStatusLine === null) return
+  STATUS_LINE_STREAM.write(ERASE_CURRENT_LINE)
+  activeStatusLine = null
+}
+
+/**
+ * 中継した子の出力が行の途中で終わっているストリームへ改行を足し、次の行を行頭から書けるようにする。
+ *
+ * @returns {void}
+ */
+function closeRelayedOutputLines() {
+  for (const streamName of midLineRelayedStreamNames) process[streamName].write('\n')
+  midLineRelayedStreamNames.clear()
+}
+
+/**
+ * stderr が、stdout（ステータス行の書き込み先）と同じ端末に出ているか。どちらも TTY のときだけ、同じ端末とみなす
+ * （`2>&1` でファイルへ流したときは見分けられない）。
+ *
+ * @returns {boolean} true なら同じ端末
+ */
+function isStderrSharingTerminalWithStdout() {
+  return process.stdout.isTTY === true && process.stderr.isTTY === true
+}
+
+/**
+ * ステータス行を書く端末で、中継した子の出力が行の途中になっているか。
+ *
+ * @returns {boolean} true なら行の途中
+ */
+function isStatusLineTerminalMidLine() {
+  if (midLineRelayedStreamNames.has('stdout')) return true
+  return midLineRelayedStreamNames.has('stderr') && isStderrSharingTerminalWithStdout()
+}
+
+/**
+ * 同じ端末に出ている他方のストリームへ中継した子の出力が行の途中なら、改行を足して閉じる。
+ * 閉じないと、こちらのストリームの罫線が画面上の行の途中に入り、他方の続きは行頭なのに罫線を欠く。
+ *
+ * @param {'stdout' | 'stderr'} streamName これから中継するストリームの名前
+ * @returns {void}
+ */
+function closeOtherRelayedStreamOnSharedTerminal(streamName) {
+  const otherStreamName = streamName === 'stdout' ? 'stderr' : 'stdout'
+  if (!midLineRelayedStreamNames.has(otherStreamName)) return
+  if (!isStderrSharingTerminalWithStdout()) return
+  process[otherStreamName].write('\n')
+  midLineRelayedStreamNames.delete(otherStreamName)
 }

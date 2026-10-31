@@ -1,5 +1,5 @@
 // 責務: GitHub Projects のボードの着手待ちから、いま着手できる Issue を着手順に選び出し、カードの Status を書き換える。
-//   拾わせたい Issue を着手待ちに置くのもここが担う。
+//   拾わせたい Issue を着手待ちに置くのもここが担う。Issue が載った project のうち、このボードのカードを見分けて Status を読むのもここが担う。
 //
 // 設計意図（WHY）:
 // - フィールド ID・選択肢 ID を設定に持たせず、毎回表記から引き直す。ID は人間が見ても正しさを
@@ -17,6 +17,7 @@
 //   `/issue-deps` を回した時点のものでしかない。引けなかったブロッカーは open と同じに扱う。
 //   「完了」と取り違えると未完の依存先を待たずに着手し、全体を止めると無関係な候補まで止まる。
 
+import { TechnicalError } from '../lib/errors.mjs'
 import { config } from './config.mjs'
 import { runJson, runOrThrow } from './shell.mjs'
 import { extractBlockerIssueNumbers, selectStartableIssues } from './startOrder.mjs'
@@ -39,25 +40,140 @@ const CARD_STATUS_QUERY = `query($itemId: ID!, $statusFieldName: String!) {
   }
 }`
 
+// findBoardStatusName が読む項目の GraphQL の選択。Issue の projectItems のノードの中に埋め込む（`$statusFieldName` を宣言したクエリで使う）。
+// 見分けに使う項目と見分ける処理を同じファイルに置き、片方だけ直して、どのカードにも一致しない（Status が null になる）事故を防ぐ
+export const BOARD_CARD_STATUS_FIELDS = `project { number owner { ... on User { login } ... on Organization { login } } }
+fieldValueByName(name: $statusFieldName) { ... on ProjectV2ItemFieldSingleSelectValue { name } }`
+
+/**
+ * いま着手できる Issue を、着手する順に並べて返す。
+ *
+ * 候補は「着手待ちの Status かつ対象ラベル付きの、自分が担当者の open な Issue」のうち対象リポジトリのもので、
+ * そこから closed だと確かめられないブロッカーが残るもの・ブロッカー節を読めないものを外し、
+ * 段番号昇順 → Issue 番号昇順に並べる。
+ *
+ * @returns {{ itemId: string, number: number, title: string, body?: string, labelNames: string[] }[]} 着手できる Issue（無ければ空配列）
+ * @throws {TechnicalError} ボードの表記が config.mjs と食い違うとき・候補が一度に読める枚数を超えたとき
+ * @throws {Error} gh が失敗したとき（shell.mjs が投げる）
+ */
+export function listStartableIssues() {
+  resolveStatusOption(board.readyStatusName)
+
+  const candidates = listReadyItems()
+    .filter((readyItem) => readyItem.repository?.endsWith(`/${repository}`))
+    .map((readyItem) => ({
+      itemId: readyItem.id,
+      number: readyItem.content.number,
+      title: readyItem.content.title,
+      body: readyItem.content.body,
+      labelNames: readyItem.labels ?? []
+    }))
+
+  return selectStartableIssues(candidates, findUnresolvedBlockerNumbers(candidates))
+}
+
+/**
+ * カード1枚の、いまの Status の表記を引く。listStartableIssues の一覧より新しい Status が要るときに使う。
+ *
+ * @param {string} itemId ボードのカード ID
+ * @returns {string | null} Status の表記（Status が空なら null）
+ * @throws {TechnicalError} カードが見つからないとき
+ * @throws {Error} gh が失敗したとき（shell.mjs が投げる）
+ */
+export function readCardStatusName(itemId) {
+  const {
+    data: { node }
+  } = runJson('gh', [
+    'api',
+    'graphql',
+    '-f',
+    `query=${CARD_STATUS_QUERY}`,
+    '-f',
+    `itemId=${itemId}`,
+    '-f',
+    `statusFieldName=${board.statusFieldName}`
+  ])
+  if (!node) throw new TechnicalError(`ボードにカード ${itemId} が見つかりません`)
+  return node.fieldValueByName?.name ?? null
+}
+
+/**
+ * Issue が載った project のカードから、config.mjs のボードのカードを見分け、その Status の表記を返す。
+ *
+ * project は number と owner の組で見分ける。同じ number の project は owner が違えば別物だからである。
+ *
+ * @param {{ project?: { number: number, owner: { login?: string } }, fieldValueByName?: { name?: string } | null }[]} projectItems Issue が載った project のカード（GraphQL の projectItems.nodes を BOARD_CARD_STATUS_FIELDS で引いたもの）
+ * @returns {string | null} Status の表記（Issue がこのボードに載っていないとき・Status が空なら null）
+ */
+export function findBoardStatusName(projectItems) {
+  const boardItem = projectItems.find(
+    ({ project }) => project?.number === board.number && project.owner.login === board.owner
+  )
+  return boardItem?.fieldValueByName?.name ?? null
+}
+
+/**
+ * Issue をこのツールが拾える形で着手待ちに置く。カードをボードに載せて Status を着手待ちへ動かし、担当者に自分を足す。
+ *
+ * 担当者を足さないと、着手待ちにあっても候補の検索（`assignee:@me`）に掛からず拾われない。
+ *
+ * @param {string} issueUrl Issue の URL
+ * @returns {void}
+ * @throws {TechnicalError} ボードの表記が config.mjs と食い違うとき・gh の出力に必要な ID が無いとき
+ * @throws {Error} gh が失敗したとき（shell.mjs が投げる）
+ */
+export function putOnReadyAssignedToMe(issueUrl) {
+  addCardWithStatus({ issueUrl, statusName: board.readyStatusName })
+  runOrThrow('gh', ['issue', 'edit', issueUrl, '--add-assignee', '@me'])
+}
+
+/**
+ * カードの Status を「着手中」を表す選択肢へ動かす。
+ *
+ * @param {string} itemId ボードのカード ID
+ * @returns {void}
+ * @throws {TechnicalError} ボードの表記が config.mjs と食い違うとき・gh の出力に必要な ID が無いとき
+ * @throws {Error} gh が失敗したとき（shell.mjs が投げる）
+ */
+export function markCardAsStarted(itemId) {
+  moveCardToStatus({ itemId, statusName: board.inProgressStatusName })
+}
+
+/**
+ * Issue のカードをボードに載せ、Status を「着手中」を表す選択肢へ動かし、その表記を返す。
+ *
+ * Issue の URL しか持たない呼び出し元（`scripts/move-issue-card.mjs`）のための入口である。
+ * 動かした先を返すので、呼び出し元は動かした先の表記を自分で持たなくてよい。
+ *
+ * @param {string} issueUrl Issue の URL
+ * @returns {string} 動かした先の選択肢の表記
+ * @throws {TechnicalError} ボードの表記が config.mjs と食い違うとき・gh の出力に必要な ID が無いとき
+ * @throws {Error} gh が失敗したとき（shell.mjs が投げる）
+ */
+export function markIssueAsStarted(issueUrl) {
+  addCardWithStatus({ issueUrl, statusName: board.inProgressStatusName })
+  return board.inProgressStatusName
+}
+
 /**
  * Status フィールドと、その選択肢の ID を表記から引く。
  *
  * @param {string} optionName 選択肢の表記（config.mjs が持つ値）
  * @returns {{ fieldId: string, optionId: string }} フィールド ID と選択肢 ID
- * @throws {Error} 表記に一致するフィールド・選択肢がボードに無いとき
+ * @throws {TechnicalError} 表記に一致するフィールド・選択肢がボードに無いとき
  */
 function resolveStatusOption(optionName) {
   const { fields } = runJson('gh', ['project', 'field-list', ...ghProjectJsonArgs])
   const statusField = (fields ?? []).find((field) => field.name === board.statusFieldName)
   if (!statusField) {
-    throw new Error(
+    throw new TechnicalError(
       `ボードに「${board.statusFieldName}」フィールドがありません。config.mjs の statusFieldName を直してください`
     )
   }
 
   const option = (statusField.options ?? []).find((candidate) => candidate.name === optionName)
   if (!option) {
-    throw new Error(
+    throw new TechnicalError(
       `「${board.statusFieldName}」に「${optionName}」という選択肢がありません。config.mjs の表記を直してください`
     )
   }
@@ -69,7 +185,8 @@ function resolveStatusOption(optionName) {
  * 着手待ちで対象ラベル付きの、自分が担当者の open な Issue のカードを取得する。
  *
  * @returns {{ id: string, labels?: string[], repository?: string, content: { number: number, title: string, body?: string } }[]} カードの配列
- * @throws {Error} gh が失敗したとき・候補が一度に読める枚数を超えたとき
+ * @throws {TechnicalError} 候補が一度に読める枚数を超えたとき
+ * @throws {Error} gh が失敗したとき（shell.mjs が投げる）
  */
 function listReadyItems() {
   const query = `"${board.statusFieldName}":"${board.readyStatusName}" label:"${targetIssueLabel}" is:issue is:open assignee:@me`
@@ -83,7 +200,7 @@ function listReadyItems() {
     query
   ])
   if (totalCount > items.length) {
-    throw new Error(
+    throw new TechnicalError(
       `着手待ちの候補 ${totalCount} 件のうち ${items.length} 件しか読めていません。読み落とした中に先に着手すべき Issue があり得るため止めます`
     )
   }
@@ -132,66 +249,16 @@ function findUnresolvedBlockerNumbers(candidates) {
 }
 
 /**
- * いま着手できる Issue を、着手する順に並べて返す。
- *
- * 候補は「着手待ちの Status かつ対象ラベル付きの、自分が担当者の open な Issue」のうち対象リポジトリのもので、
- * そこから closed だと確かめられないブロッカーが残るもの・ブロッカー節を読めないものを外し、
- * 段番号昇順 → Issue 番号昇順に並べる。
- *
- * @returns {{ itemId: string, number: number, title: string, body?: string, labelNames: string[] }[]} 着手できる Issue（無ければ空配列）
- * @throws {Error} ボードの表記が config.mjs と食い違うとき・gh が失敗したとき
- */
-export function listStartableIssues() {
-  resolveStatusOption(board.readyStatusName)
-
-  const candidates = listReadyItems()
-    .filter((readyItem) => readyItem.repository?.endsWith(`/${repository}`))
-    .map((readyItem) => ({
-      itemId: readyItem.id,
-      number: readyItem.content.number,
-      title: readyItem.content.title,
-      body: readyItem.content.body,
-      labelNames: readyItem.labels ?? []
-    }))
-
-  return selectStartableIssues(candidates, findUnresolvedBlockerNumbers(candidates))
-}
-
-/**
- * カード1枚の、いまの Status の表記を引く。listStartableIssues の一覧より新しい Status が要るときに使う。
- *
- * @param {string} itemId ボードのカード ID
- * @returns {string | null} Status の表記（Status が空なら null）
- * @throws {Error} gh が失敗したとき・カードが見つからないとき
- */
-export function readCardStatusName(itemId) {
-  const {
-    data: { node }
-  } = runJson('gh', [
-    'api',
-    'graphql',
-    '-f',
-    `query=${CARD_STATUS_QUERY}`,
-    '-f',
-    `itemId=${itemId}`,
-    '-f',
-    `statusFieldName=${board.statusFieldName}`
-  ])
-  if (!node) throw new Error(`ボードにカード ${itemId} が見つかりません`)
-  return node.fieldValueByName?.name ?? null
-}
-
-/**
  * カードの Status を、表記で指定した選択肢へ動かす。
  *
- * @param {string} itemId ボードのカード ID
- * @param {string} statusName 動かす先の選択肢の表記（config.mjs が持つ値）
+ * @param {{ itemId: string, statusName: string }} params ボードのカード ID と、動かす先の選択肢の表記（config.mjs が持つ値）
  * @returns {void}
- * @throws {Error} ボードの表記が config.mjs と食い違うとき・gh が失敗したとき
+ * @throws {TechnicalError} ボードの表記が config.mjs と食い違うとき・gh の出力に必要な ID が無いとき
+ * @throws {Error} gh が失敗したとき（shell.mjs が投げる）
  */
-function moveCardToStatus(itemId, statusName) {
+function moveCardToStatus({ itemId, statusName }) {
   const { id: projectId } = runJson('gh', ['project', 'view', ...ghProjectJsonArgs])
-  if (!projectId) throw new Error('gh project view の出力に project の ID がありません')
+  if (!projectId) throw new TechnicalError('gh project view の出力に project の ID がありません')
   const { fieldId, optionId } = resolveStatusOption(statusName)
 
   runOrThrow('gh', [
@@ -213,7 +280,8 @@ function moveCardToStatus(itemId, statusName) {
  *
  * @param {string} issueUrl Issue の URL
  * @returns {string} ボードのカード ID
- * @throws {Error} gh が失敗したとき
+ * @throws {TechnicalError} gh の出力にカードの ID が無いとき
+ * @throws {Error} gh が失敗したとき（shell.mjs が投げる）
  */
 function addCard(issueUrl) {
   const { id: itemId } = runJson('gh', [
@@ -223,62 +291,22 @@ function addCard(issueUrl) {
     '--url',
     issueUrl
   ])
-  if (!itemId) throw new Error('gh project item-add の出力にカードの ID がありません')
+  if (!itemId) throw new TechnicalError('gh project item-add の出力にカードの ID がありません')
   return itemId
 }
 
 /**
  * Issue のカードをボードに載せ、Status を表記で指定した選択肢へ動かす。
  *
- * @param {string} issueUrl Issue の URL
- * @param {string} statusName 動かす先の選択肢の表記（config.mjs が持つ値）
- * @returns {string} 動かした先の選択肢の表記
- * @throws {Error} ボードの表記が config.mjs と食い違うとき・gh が失敗したとき
+ * @param {{ issueUrl: string, statusName: string }} params Issue の URL と、動かす先の選択肢の表記（config.mjs が持つ値）
+ * @returns {void}
+ * @throws {TechnicalError} ボードの表記が config.mjs と食い違うとき・gh の出力に必要な ID が無いとき
+ * @throws {Error} gh が失敗したとき（shell.mjs が投げる）
  */
-function addCardWithStatus(issueUrl, statusName) {
+function addCardWithStatus({ issueUrl, statusName }) {
   // 表記が食い違うボードに「Status の無いカード」を増やさないため、載せる前に選択肢の実在を確かめる
   resolveStatusOption(statusName)
   // 載せた直後の書き換えが、組み込みワークフロー（載せたカードの Status を決める自動化）に上書きされないことは
-  // 確かめていない。カードが Status を変えずに残る回が出たら、載せた後に読み直して書き直す処理が要る
-  moveCardToStatus(addCard(issueUrl), statusName)
-  return statusName
-}
-
-/**
- * Issue をこのツールが拾える形で着手待ちに置く。カードをボードに載せて Status を着手待ちへ動かし、担当者に自分を足す。
- *
- * 担当者を足さないと、着手待ちにあっても候補の検索（`assignee:@me`）に掛からず拾われない。
- *
- * @param {string} issueUrl Issue の URL
- * @returns {void}
- * @throws {Error} ボードの表記が config.mjs と食い違うとき・gh が失敗したとき
- */
-export function putOnReadyAssignedToMe(issueUrl) {
-  addCardWithStatus(issueUrl, board.readyStatusName)
-  runOrThrow('gh', ['issue', 'edit', issueUrl, '--add-assignee', '@me'])
-}
-
-/**
- * カードの Status を「着手中」を表す選択肢へ動かす。
- *
- * @param {string} itemId ボードのカード ID
- * @returns {void}
- * @throws {Error} ボードの表記が config.mjs と食い違うとき・gh が失敗したとき
- */
-export function markCardAsStarted(itemId) {
-  moveCardToStatus(itemId, board.inProgressStatusName)
-}
-
-/**
- * Issue のカードをボードに載せ、Status を「着手中」を表す選択肢へ動かし、その表記を返す。
- *
- * Issue の URL しか持たない呼び出し元（`scripts/move-issue-card.mjs`）のための入口である。
- * 動かした先を返すので、呼び出し元は動かした先の表記を自分で持たなくてよい。
- *
- * @param {string} issueUrl Issue の URL
- * @returns {string} 動かした先の選択肢の表記
- * @throws {Error} ボードの表記が config.mjs と食い違うとき・gh が失敗したとき
- */
-export function markIssueAsStarted(issueUrl) {
-  return addCardWithStatus(issueUrl, board.inProgressStatusName)
+  // 確かめていない
+  moveCardToStatus({ itemId: addCard(issueUrl), statusName })
 }

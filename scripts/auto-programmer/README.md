@@ -28,7 +28,7 @@
 
 2 で「着手できる」とは、本文の `## ブロッカー` 節に並ぶ Issue が全部 closed であることを指す。着手できる Issue のうち、タイトル先頭の段番号（`/issue-deps` が書き込む）の小さい順、同じ段なら Issue 番号の小さい順に選ぶ。
 
-2 で先に Issue を閉じるのは、自動マージされた PR の `Closes #N` が Issue を閉じないためである（`scripts/close-issues.mjs`）。毎周閉じるので、回している間にマージされた PR の Issue も次の周で閉じ、それをブロッカーに持つ Issue を拾える。閉じられなくても、そのまま Issue を選びに進む。
+2 で先に Issue を閉じるのは、自動マージされた PR の `Closes #N` が Issue を閉じないためである（`scripts/close-issues.mjs`）。読むのは、同じリポジトリのブランチから出て、作者が bot か書き込み権限を持つ人のマージ済み PR だけで、マージ後に一度 close されて開け直された Issue は閉じない。毎周閉じるので、回している間にマージされた PR の Issue も次の周で閉じ、それをブロッカーに持つ Issue を拾える。閉じられなくても、そのまま Issue を選びに進む。
 
 5 と 7 で「子を Ready に載せる」とは、open な子をボードに載せ、Status を Ready にし、担当者を自分にすることを指す。載せた子は次の周から 2 で拾われる。親は実装せず、カードは In progress のまま残す。子を持つ親を実装すると、子と作業が二重になるためである。
 
@@ -140,6 +140,8 @@ npm run auto-programmer
 | `targetIssueLabel`            | 対象にする Issue のラベル                                                                 | `gh label list`                                                                               |
 | `branchPrefix`                | トピックブランチ名の前に付ける接頭辞（`'st2'` なら `st2/feat/issue-123`。空なら付けない） | ライン（`main`・`main2` など）ごとに CI を分けているときだけ設定する。前提は表の下に書く      |
 | `sessionTimeoutMinutes`       | claude セッション1回（Skill 1つぶん）を打ち切るまでの分数                                 | 長いほうの実装に掛かる時間の上限として決める                                                  |
+| `sessionModel`                | claude セッションに `--model` で渡すモデル（既定 `sonnet`）                               | `claude --help` の `--model`。別名（`sonnet`・`opus`）か正式名                                |
+| `sessionEffort`               | claude セッションに `--effort` で渡す effort（既定 `xhigh`）                              | `claude --help` の `--effort`                                                                 |
 | `pollIntervalMinutes`         | 着手できる Issue が無かったとき、ボードを見直すまで待つ分数                               | 短すぎると `gh project` の呼び出し頻度が上がり、GitHub API のレートリミットに達しやすくなる   |
 | `maxConsecutiveIdleWaits`     | 着手できない周が続いたとき、待ってよい回数の上限（使い切っても着手できなければ止まる）    | 放置を許せる時間（`pollIntervalMinutes` × この回数）から決める                                |
 | `ci.workflowFile`             | push で走り、マージ可否を決めるワークフローのファイル名                                   | `.github/workflows/` の下のファイル名                                                         |
@@ -160,6 +162,8 @@ npm run auto-programmer
 - `ci.workflowFile` がそのワークフローを指す
 
 `sessionTimeoutMinutes` は壁時計（wall-clock）で数える。OS がアイドルスリープすると、寝ていた時間もここに数えられ、無人セッションが実際より早く打ち切られる。`index.mjs` は起動直後にこれを防ぐコマンド（macOS は `caffeinate`、Windows は同梱の `sleepGuard.ps1`）を起動し続けるが、ノートPCの蓋を閉じたことによるスリープ（クラムシェルスリープ）までは止められない。実行中は蓋を閉じないか、外部ディスプレイに繋いでおくこと。Linux は `CLOCK_MONOTONIC` がサスペンド中に止まるため、この問題自体が起きず、何もしない。
+
+`sessionModel`・`sessionEffort` は、どの Issue にも同じ値を使う。Issue の `opus` ラベルは読まないので、`opus` の Issue を回すときは、この2つを最上位モデル・effort 最大に変えるか、人間が対話で回す（[development-flow](../../docs/guide/development-flow.md)「フェーズごとにどのモデルで回すか」）。値を `claude` に渡すのは、渡さないと無人セッションが `~/.claude/settings.json` を継ぐからである。そこは対話で `/model` を打つたびに書き換わるので、無人実行のモデルが人間の最後の選択に引きずられる。2つのキーのどちらかが欠けていると、Issue を拾う前に止まる。
 
 AI 専用 clone と実行記録は `~/dev/auto-programmer/` の下に置かれる。置き場を変えたいときは、`config.mjs` を編集せず環境変数 `AUTO_PROGRAMMER_HOME` で指定する。
 
@@ -195,6 +199,32 @@ AI 専用 clone と実行記録は `~/dev/auto-programmer/` の下に置かれ�
 
 色は端末に直接出すときだけ付く。ファイルへリダイレクトしたときと、`NO_COLOR=1` を付けたときは自動で落ちる。
 
+## 1件を終えたときの読み上げ
+
+Issue 1件の締めの表示に合わせて、macOS では `say`、Windows では `powershell.exe -NoProfile` から System.Speech（Windows 標準の音声合成）の `SpeechSynthesizer` で、次の1文を読み上げる。声は指定せず、OS の既定の声に任せる。
+
+```
+issue <番号>、<結果の言葉>。<タイトル>
+```
+
+タイトルの頭の段番号（`3. ` や `3〜5. `）は外す。長いタイトルも切り詰めない。結果を先に読むので、長いタイトルは聞き流してよい。
+
+結果の言葉は、画面の締めの記号と同じ判定で決める。次の上から順に当てて、最初に当たったものを読む。
+
+- 例外で落ちた（✗）：「失敗しました」
+- 人間の手当てが要る（⚠）：「要確認です」
+- 成功（✓）で、子 Issue を1件以上着手待ちに載せた：「子の issue に引き継ぎました」
+- 成功（✓）：「完了しました」
+
+次の場合は読み上げない。
+
+- macOS と Windows 以外の OS
+- 衝突した PR を解かせる流れ。Issue を終えることではないため
+
+Windows では、読む文を環境変数 `AUTO_PROGRAMMER_SPEECH_SENTENCE` で渡し、`-Command` の文字列はタイトルによらず固定にする。タイトルは GitHub から来る外部が書ける文字列で、`-Command` に埋め込むと、`"` や `;` を含むタイトルがコマンドとして実行されるためである。既定の声が日本語に対応していない PC では、日本語のタイトルが読まれないことがある。
+
+読み上げの終わりは待たない。`say` や `powershell.exe` を起動できなかったときと、0 以外で終わったときは、⚠ の警告を1行出して続ける。並べて動かした複数のプロセスが同時に終えると、声は重なる。
+
 ## 待っている間の表示
 
 待っている間は、ステータス行が表示される。この行は、対話的な端末で直接見ているとき（TTY）と、`npm run auto-programmer 2>&1 | tee` のようにファイルやパイプへ流したとき（非TTY）とで見え方が変わる。
@@ -222,7 +252,7 @@ tail -3 ~/dev/auto-programmer/runs.jsonl | jq .
 直すのは次のものだけ。
 
 - **`config.mjs`**：上の表の値をその環境のものへ書き換える。書き換えないと `npm run move-issue-card` はボード未設定とみなして何もしない。テンプレートの同期（`scripts/sync-template.sh`）は `config.mjs` を上書きしないので、同期で `maxConsecutiveIdleWaits` のような新しいキーが増えたときは手で足す（無いと起動時に落ちる）。逆に `baseBranch` のように使われなくなったキーは残っても害が無いが、値を変えても何も起きないので消してよい。clone の番号とロックの置き場は既存の `workspaceDir` から導くので、同期した後も古い `config.mjs` のまま、キーを足さずに並べて動かせる
-- **`package.json`**：`auto-programmer`・`move-issue-card`・`close-issues`・`test:scripts` のスクリプトを写す
+- **`package.json`**：`auto-programmer`・`move-issue-card`・`close-issues` のスクリプトを写す
 - **`ci.workflowFile` のワークフロー**：`branchPrefix` を設定したときだけ、push トリガー（`on.push.branches`）に同じ接頭辞を足す（例：`'st2/**'`）。足さないと CI が走らず、PR も作られない。接頭辞は既存のブランチ（`main2` など）と同じ名前にできない（git がその下にブランチを作れないので、起動時に止まる）
 - **`.claude/skills/auto-dev/`・`.claude/skills/auto-fix-ci/`・`.claude/skills/auto-resolve-conflict/`・`.claude/skills/issue-check/`**：そのリポジトリの `.claude/skills/` へ写す（`/auto-dev`・`/auto-fix-ci`・`/auto-resolve-conflict` が無いと手順が無い。`/issue-check` は `.claude/agents/issue-auditor-agent/` と、割るときに使う `.claude/skills/issue-split/` も要る。`/issue-split` は正典として `.claude/skills/to-issues/`・`.claude/skills/quick-issue/` を参照するので、これも写す。初回の検査で外部依存の制約を調べるために `.claude/agents/premise-checker-agent/` も要る。これは一次資料の定義を `.claude/skills/origin-search/` から読むので、これも写す。`issue-auditor-agent` は過去の決定を引く手順を `.claude/skills/past-decision-search/` から読むので、これも写す）
 
@@ -238,7 +268,7 @@ tail -3 ~/dev/auto-programmer/runs.jsonl | jq .
 | 「候補を引けませんでした」                                                                         | `gh` が失敗したか、ボードの表記が `config.mjs` と食い違っている                                                                                                                                | 続く理由を読んで直す（`pollIntervalMinutes` ごとにやり直す。この周も `maxConsecutiveIdleWaits` の回数に数える）                                                                                                                     |
 | 「着手できない状態が … 回（約 … 分）続いたので止めます」                                           | Ready に着手できる Issue が無い（全部にブロッカーが残る場合を含む）・`gh` が失敗し続けた・候補を全件飛ばした、のいずれかが続き、`maxConsecutiveIdleWaits` 回待っても変わらなかった（正常終了） | 直前の警告・エラーを読み、カードを Ready へ動かす・ブロッカーを片付ける・原因を直したうえで打ち直す。自動マージ待ちの間に止まるなら `maxConsecutiveIdleWaits` を増やす                                                              |
 | 「… に needs-human-check ラベルがありません」                                                      | 対象リポジトリにラベルが無い                                                                                                                                                                   | 表示されたコマンドで対象リポジトリにラベルを作り、打ち直す                                                                                                                                                                          |
-| 「GitHub CLI が未ログインです」                                                                    | `gh auth status` が通らない                                                                                                                                                                    | `gh auth login`                                                                                                                                                                                                                     |
+| 「`gh auth status` が失敗しました」                                                                | 未ログインのほか、古い gh や通信できない場合でも失敗する                                                                                                                                       | 続く gh の出力を読む。未ログインなら `gh auth login`                                                                                                                                                                                |
 | 「待機中（着手できる Issue なし）」                                                                | Ready に対象ラベル付きで自分が担当者の open な Issue が無いか、全部にブロッカーが残っている（ブロッカー節を読めないものも含む）                                                                | ボードのカードを Ready へ動かして自分を担当者にする・ブロッカーを片付ける                                                                                                                                                           |
 | 「#… を飛ばします: リモートに … が残っています」                                                   | 同じ Issue のブランチが前回の実行から残っている                                                                                                                                                | 前回の PR を閉じてブランチを消す（次の巡回で拾われる）                                                                                                                                                                              |
 | 「#… を飛ばします: PID … のプロセスが着手中です」（ℹ）                                             | 同じマシンの他のプロセスが、その Issue のロックを持っている                                                                                                                                    | 対処は不要。その PID のプロセスがもういないのにロックが残っているなら、次に取ろうとしたときに取り直される。`ps -p <PID>` で動いているかを確かめられる                                                                               |
@@ -249,10 +279,11 @@ tail -3 ~/dev/auto-programmer/runs.jsonl | jq .
 | 「#… を飛ばします: …」（上記以外）                                                                 | 着手前の準備が落ちた。カードは Ready に残り、毎巡回で試される                                                                                                                                  | 理由を読んで直す                                                                                                                                                                                                                    |
 | 「…という選択肢がありません」                                                                      | ボードの表記と `config.mjs` の表記が食い違っている                                                                                                                                             | `gh project field-list` の表示に合わせる                                                                                                                                                                                            |
 | 「claude コマンドが見つかりません」                                                                | Claude Code が入っていない                                                                                                                                                                     | Claude Code を入れる                                                                                                                                                                                                                |
-| 「実装へ進みません: /issue-check が人間の判断を要すると判定しました」「… close しました」          | `/issue-check` が人間の判断を要すると判定したか、不要として close した。カードは In progress に残る                                                                                            | Issue のコメントを読む。人間判断なら `/issue-decide` で決めてからカードを Ready へ戻す                                                                                                                                              |
+| 「実装へ進みません: /issue-check が人間の判断を要すると判定しました」「… close しました」          | `/issue-check` が人間の判断を要すると判定したか、不要として close した。カードは In progress に残る                                                                                            | Issue のコメントを読む。人間判断なら `/issue-decide` で決めてからカードを Ready へ戻す（割り方の人間判断は除く。下の行のとおりにする）                                                                                              |
 | 「実装へ進みません: /issue-check が人間しかできない作業だと判定しました」                          | `/issue-check` が、残る作業はすべて人間しかできないと判定し、`ready-for-human` に貼り替えた。カードは In progress に残る                                                                       | Issue のコメントを読み、人間が作業する                                                                                                                                                                                              |
 | 「実装へ進みません: /issue-check が ai-fixable を外しました」                                      | `/issue-check` が `ai-fixable` を外したが、`needs-human-decision`・`ready-for-human` のどちらも付けなかった。カードは In progress に残る                                                       | Issue のコメントとラベルを読み、正しいラベルを付け直す。`ai-fixable` に戻したらカードを Ready へ戻す                                                                                                                                |
 | 同上（人間判断）で、Issue のコメントが分割の失敗を伝えている                                       | `/issue-check` が割ろうとしたが、子の紐付けか親の作り替えに失敗したので、親を人間判断にした。カードは In progress に残る                                                                       | コメントに並ぶ子を手で紐付け直すか閉じ、`needs-human-decision` を外して `ai-fixable` に戻してから、カードを Ready へ戻す。`/issue-decide` は紐付けの修復を担わないので使わない                                                      |
+| 同上（人間判断）で、Issue のコメントが割り方の人間判断を伝えている                                 | `/issue-check` が、見込み行数が MUST の線以上で、割らない例外に当たらず、単体で検証できる片に割れないと判定し、親を人間判断にした。カードは In progress に残る                                 | 人間が割り方を決めて `/issue-split <番号>` を打つ。issue-policy「ラベルの移し先」の行に従い、親の `needs-human-decision` を外して `ai-fixable` に戻し、カードを Ready へ戻す。`/issue-decide` は割らないので使わない                |
 | 「実装へ進みません: /issue-check が判定を書き戻しませんでした」                                    | 監査は終わったが `issue:checked` が貼られていない（判定を読めなかった・`gh` が失敗したなど）                                                                                                   | Issue のコメントを読み、必要なら人間が `/issue-check #<番号>` を打ってからカードを Ready へ戻す                                                                                                                                     |
 | 「実装せず子へ引き継ぎます: open な sub-issue を … 件持ちます。Ready に載せた子は 0 件です」       | 親を実装せずに止めたが、載せられる子が無かった（open な子がどれも、載せない条件に当たった）。親のカードは In progress に残る                                                                   | 子の担当者・ラベル・カードの Status を見て、載せなかった理由が正しいかを確かめる                                                                                                                                                    |
 | 「実装せず子へ引き継ぎます: open な sub-issue を … 件持ちます」（上記以外）                        | umbrella（子への入口）になった親。子を Ready に載せて引き継いだ。親のカードは、子が全部 close されるまで In progress に残る                                                                    | 対処は不要                                                                                                                                                                                                                          |

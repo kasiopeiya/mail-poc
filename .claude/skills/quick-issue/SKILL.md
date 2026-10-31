@@ -36,7 +36,6 @@ description: 確認不要で手早く GitHub Issue を起票する。思いつ�
 
 - **確認不要**：ユーザーへの問い返し（AskUserQuestion・承認待ち）は行わず、与えられた情報からそのまま起票する（唯一の例外は「入力の解釈」で述べる、起票内容がまったく不明な場合の1行確認）。
 - **既存の規定の違反に自分で気づいたときは、それを今後防ぐ仕組み（hook・検査スクリプト・CI ジョブ・レビュー項目）の新設を起票しない**：起票するのは壊れている成果物の修正だけで、仕組みの新設を起票してよいのは人間に指摘されたときに限る（[policy-driven-development-policy](../../../docs/policy/policy-driven-development-policy.md) が正典）。
-- **デフォルトで自分にアサイン**：`--assignee @me` を付与する。
 - **ラベルは後述の「付与するラベル」に従う**：ユーザーが別のラベルを指定した場合は追加で並べ、本スキルが付けるラベルは外さない。
 - テンプレートの全セクションを本文に必ず含める。「対応方針」と「人間に決めてほしいこと」だけは、各セクションの条件に従って片方だけを書く。
 
@@ -48,6 +47,8 @@ description: 確認不要で手早く GitHub Issue を起票する。思いつ�
 - `ai-fixable` / `needs-human-decision` / `ready-for-human`：**必ずどれか1つだけ**を付ける。判定はポリシーの「人間が決めるべき Issue の条件」と「人間しかできない作業の条件」に従う
 - `issue:decided`：`ai-fixable` か `ready-for-human` にだけ重ねる。条件はポリシーの「人間が方針を決めたら `issue:decided` を付ける」に従う
 - `harness`：ポリシーの「`harness` を付ける条件」に当たるときに重ねる。3択のどれを付けたかとは別に決める
+- `opus`：ポリシーの「`opus` を付ける条件」の条件B・Cに当たるときに、起票時に重ねる。3択のどれを付けたかとは別に決める。条件Aは `add-opus-label.yml` が付けるので、ここでは判定しない
+- `customer-question`：ポリシーの「Issue に付けるラベル」表の `customer-question` の付ける条件に当たるときに、`needs-human-decision` に重ねる
 
 ### 人間の作業を別 Issue に切り出す
 
@@ -258,6 +259,8 @@ AI の作業と、ポリシーの「人間しかできない作業の条件」�
 - [ ] `ai-fixable` / `needs-human-decision` / `ready-for-human` のどれか1つだけを決めた
 - [ ] ポリシーの「Issue に付けるラベル」表で `broken-window` を付けるかを決めた（当たれば `broken-window` を付けた）
 - [ ] ポリシーの「`harness` を付ける条件」に当たるかを決めた（当たれば `harness` を付けた）
+- [ ] ポリシーの「`opus` を付ける条件」の条件B・Cに当たるかを決めた（当たれば `opus` を付けた）
+- [ ] ポリシーの「Issue に付けるラベル」表で `customer-question` を付けるかを決めた（当たれば `customer-question` を付けた）
 - [ ] AI の作業と、ポリシーの「人間しかできない作業の条件」に当たる作業が1件に混ざっていない（混ざっていたら「人間の作業を別 Issue に切り出す」に従って2件に分けた）
 - [ ] `ready-for-human` を付けたなら、残るタスクがすべてポリシーの「人間しかできない作業の条件」のどれに当たるかを言えて、人間がするタスクの頭に「（人間）」と書いた
 - [ ] 人間が決めるべき条件に当たるのに `ai-fixable` か `ready-for-human` を付けたなら、ポリシーの「人間が方針を決めたら `issue:decided` を付ける」の条件を満たし、`issue:decided` と「人間が決めたこと」の行を付けた
@@ -265,6 +268,7 @@ AI の作業と、ポリシーの「人間しかできない作業の条件」�
 - [ ] `ai-fixable` か `ready-for-human` を付けたなら「対応方針」に採る案・「いま→変えた後」の対比・根拠・却下案を書き、対比には実際の文言（またはふるまい）を引用した
 - [ ] `/link-root-issue` の「ルートを決める」段でルートを決めた（分解元の親があるなら、その親のグループにした）
 - [ ] タイトルの先頭に段番号を付けた（「ブロッカー」節と、決めたルートのグループから数えた）
+- [ ] 起票コマンドに `--assignee @me` を付けた（Auto Programmer は候補を `assignee:@me` で探すため）
 
 ### 4. 起票
 
@@ -274,7 +278,7 @@ AI の作業と、ポリシーの「人間しかできない作業の条件」�
 gh issue create \
   --title "<タイトル>" \
   --assignee @me \
-  --label <ai-fixable|needs-human-decision|ready-for-human>[,broken-window][,issue:decided][,harness] \
+  --label <ai-fixable|needs-human-decision|ready-for-human>[,broken-window][,issue:decided][,harness][,opus][,customer-question] \
   --body "$(cat <<'EOF'
 （テンプレートの全セクションを埋めた本文）
 EOF

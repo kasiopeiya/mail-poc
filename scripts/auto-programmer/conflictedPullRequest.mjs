@@ -8,24 +8,12 @@
 //   ブランチは、もうこのツールの持ち物ではない。その中身を、権限確認を飛ばした無人セッションと `npm ci` で走らせない。
 // - mergeable が CONFLICTING の PR だけを選ぶ。UNKNOWN は GitHub がまだ計算していないだけなので、次の巡回で見直す。
 // - `needs-human-check` が付いた Issue の PR は解かせない。解けずに離脱した PR を、人間が見るまで何度も解かせ直さない。
-// - I/O も import も持たない層をここに切り出すことで、GitHub に触れずに単体テストできる。
+// - I/O も import も持たない層をここに切り出すことで、GitHub に触れずに確かめられる。
 
 const CONFLICTING_MERGEABLE_STATE = 'CONFLICTING'
 
 // selectConflictedOwnPullRequests が読む項目。`gh pr list --json` に渡す側と読む側で食い違うと、衝突を常に見落とす
 export const CONFLICT_CHECK_PULL_REQUEST_FIELDS = 'number,url,headRefName,mergeable'
-
-/**
- * 実行記録の1件から、このツールが最後に CI を待った commit の SHA を読む。
- *
- * @param {{ ciRuns?: unknown }} runRecord 実行記録の1件
- * @returns {string | null} 最後に CI を待った commit の SHA（CI を待っていなければ null）
- */
-function readLastWaitedHeadSha(runRecord) {
-  if (!Array.isArray(runRecord.ciRuns)) return null
-  const lastCiRun = runRecord.ciRuns.at(-1)
-  return typeof lastCiRun?.headSha === 'string' ? lastCiRun.headSha : null
-}
 
 /**
  * 実行記録から、このツールが作った PR を URL ごとに集める。同じ PR の記録が何件もあれば、後の記録を採る。
@@ -101,8 +89,25 @@ export function findReasonNotToResolveConflict({
     return 'このツールが最後に CI を待った commit の後に、別の push があります（人間か別の仕組みが引き取ったので触りません）'
   }
   if (issue.state !== 'OPEN') return `#${issue.number} が閉じています`
-  if (issue.labelNames.includes(needsHumanCheckLabel)) {
+  // GitHub のラベル名は大文字小文字を区別しない
+  if (
+    issue.labelNames.some(
+      (labelName) => labelName.toLowerCase() === needsHumanCheckLabel.toLowerCase()
+    )
+  ) {
     return `#${issue.number} に ${needsHumanCheckLabel} が付いています`
   }
   return null
+}
+
+/**
+ * 実行記録の1件から、このツールが最後に CI を待った commit の SHA を読む。
+ *
+ * @param {{ ciRuns?: unknown }} runRecord 実行記録の1件
+ * @returns {string | null} 最後に CI を待った commit の SHA（CI を待っていなければ null）
+ */
+function readLastWaitedHeadSha(runRecord) {
+  if (!Array.isArray(runRecord.ciRuns)) return null
+  const lastCiRun = runRecord.ciRuns.at(-1)
+  return typeof lastCiRun?.headSha === 'string' ? lastCiRun.headSha : null
 }

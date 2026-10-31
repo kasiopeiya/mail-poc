@@ -22,8 +22,6 @@ const TEST_NAME_CALLEE_PATHS = [
   'callee.callee.object.object.name',
   'callee.tag.object.name'
 ]
-const buildTestFunctionCallSelector = (functionNamePattern) =>
-  `CallExpression:matches(${TEST_NAME_CALLEE_PATHS.map((path) => `[${path}=${functionNamePattern}]`).join(', ')})`
 
 // 規模・複雑度の上限。SSOT は .claude/rules/typescript.md の表で、値を変えるときはまずそちらを直す。
 // .ts と .mjs でブロックを分けるのは local プラグインの登録の都合なので、値はここ1箇所に持つ。
@@ -75,8 +73,8 @@ const ifStatementInTestCaseSelector = {
 }
 
 export default tseslint.config(
-  // 静的解析の対象外。cdk.out は CDK 合成物、*.d.ts は生成物なので除外する
-  { ignores: ['**/node_modules/**', '**/cdk.out/**', 'dist/**', '**/*.d.ts'] },
+  // 静的解析の対象外。cdk.out は CDK 合成物、*.d.ts は生成物、tmp は gitignore 済みの出力物なので除外する
+  { ignores: ['**/node_modules/**', '**/cdk.out/**', 'dist/**', '**/*.d.ts', '**/tmp/**'] },
 
   // 全ファイル共通: Node 実行環境のグローバルを有効化
   {
@@ -271,3 +269,8 @@ export default tseslint.config(
     }
   }
 )
+
+// アロー関数の変数にしない：上の nonJapaneseTestNameSelectors などが、モジュールの読み込み時にこの宣言より前の行から呼ぶため、巻き上げが要る
+function buildTestFunctionCallSelector(functionNamePattern) {
+  return `CallExpression:matches(${TEST_NAME_CALLEE_PATHS.map((path) => `[${path}=${functionNamePattern}]`).join(', ')})`
+}
