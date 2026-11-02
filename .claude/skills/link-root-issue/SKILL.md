@@ -1,6 +1,6 @@
 ---
 name: link-root-issue
-description: 起票した Issue をルート Issue（Issue 階層の最上位の常設 Issue）の下に紐づける。起票前にルートを決める段と、起票後に紐づける段を持つ。Issue を起票する Skill が、起票の前後に Read して手順に従う。「link-root-issue」「ルート Issue に紐づけて」と指示されたとき。
+description: 起票した Issue をルート Issue（Issue 階層の最上位の常設 Issue）の下に紐づける。「link-root-issue」「ルート Issue に紐づけて」と指示されたとき。
 argument-hint: '<Issue番号> [ルート名]'
 ---
 
@@ -69,6 +69,14 @@ GraphQL の形は worktree で動くセッションのガードに拒否され�
 ```bash
 gh api repos/<owner>/<repo>/issues/<子の番号> --jq .id
 gh api --method POST repos/<owner>/<repo>/issues/<ルートの番号>/sub_issues -F sub_issue_id=<子のデータベース ID>
+```
+
+この REST の形は、ルート以外の親（`/to-issues` の起点 Issue やまとめ用の親、`/issue-split` で割る親、`/issue-regroup` の移動先）に子を紐づけるときの正典でもある。それらの Skill は、ここのコマンドだけを使う（2-1・2-2 はルートを探す手順なので使わない）。
+
+**子がすでに別の親を持つとき（付け替え）**は、POST に `-F replace_parent=true` を足す。1回の呼び出しで元の親から外れ、新しい親に付く。
+
+```bash
+gh api --method POST repos/<owner>/<repo>/issues/<移動先の親の番号>/sub_issues -F sub_issue_id=<子のデータベース ID> -F replace_parent=true
 ```
 
 **紐付けに失敗しても、起票そのものは成功している。** 失敗したら親が付かなかったことを伝えて続行し、起票をやり直さない（同じ Issue を二重に立てることになる）。ただし、ルートの sub-issue が上限に達しているときは、2-4 の世代交代を行ってから紐づけ直す。

@@ -49,7 +49,7 @@ flowchart LR
     Push([⚡ topic ブランチへ push])
     PR["📝 create-pull-request<br/>PR を自動生成"]
     Detect["🔍 detect-changes<br/>変更種別を判定<br/>docs のみ / アプリ / CDK"]
-    Always["✓ 常時実行の検査<br/>ci-format / ci-hooks<br/>ci-links / ci-claude-md"]
+    Always["✓ 常時実行の検査<br/>ci-format / ci-hooks / ci-links<br/>ci-claude-md / ci-rules<br/>ci-descriptions / ci-workflows"]
     Common["✓ ci-common<br/>全体を舐める検査<br/>docs のみなら skip"]
     App["✓ ci-app<br/>app/ 変更時のみ"]
     Cdk["✓ ci-cdk<br/>infra/ 変更時のみ"]
@@ -82,6 +82,7 @@ flowchart LR
 
 - PRの変更ファイルを見て変更種別ラベルをつける（AI）
 - pr-review-policy をもとにPRの人間レビューが必要かを判定する（AI。`needs-human-review` ラベルをつける）
+- pr-review-policy でパスだけで方針が決まる行に当たる PR には、AI より前に決定論のステップでも `needs-human-review` ラベルをつける
 - 人間レビューが必要なPRのサイズを判定し、結果をコメントする（スクリプト。NG でもマージは止めない）
 - 人間レビューが必要なPRには、レビュー用の Issue を1件起票する。PR が閉じたら、別ワークフロー `close-human-review-issue.yml` がその Issue を閉じる
 
@@ -90,7 +91,7 @@ flowchart LR
     Start([🎯 cicd-gate 成功<br/>＝pipeline 完了])
 
     subgraph Triage["🤖 pr-triage ジョブ（merge 権限なし）"]
-        Det["⓪ パス判定（決定論）<br/>Policy・CLAUDE.md に変更があれば policy、<br/>.github/・scripts/ci/ なら cicd も付与"]
+        Det["⓪ パス判定（決定論）<br/>pr-review-policy でパスだけで方針が決まる行に当たれば、<br/>種類ラベルと needs-human-review を付与"]
         Ai["① AI advisory<br/>pr-label"]
         Chk["② サイズ判定（決定論）<br/>needs-human-review が付いていれば<br/>scripts/ci/pr-check.mjs を実行しコメント"]
         Iss["③ Issue 起票（決定論）<br/>needs-human-review が付いていれば<br/>PR 番号だけの Issue を1件"]
@@ -109,6 +110,7 @@ flowchart LR
 
     Start --> Det
     Triage ==> AutoJob
+    Det -. 付与 .-> Label
     Ai -. 付与 .-> Label
     Ai -. 振る舞い変更判定不能 .-> Triage2
     Label -. 判定材料 .-> Judge
@@ -205,20 +207,23 @@ flowchart LR
 
 PR がゲートを通るまでに何を検査しているかの一覧。個々のルールと閾値は設定ファイルとスクリプトが正で、ここは概要だけを置く。
 
-| 分類     | ジョブ         | 検査（ツール）             | 実行条件（変更パス）                             | 何を見るか                                                                     |
-| -------- | -------------- | -------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------ |
-| 常時実行 | `ci-format`    | 整形（prettier）           | 常に（`.md` も整形対象）                         | `.md` を含む全ファイルの整形崩れ                                               |
-| 常時実行 | `ci-hooks`     | policy hook（node:test）   | 常に（発火対象を `docs/policy/*.md` が宣言する） | ポリシーを読み込む hook が、`applies-to` の宣言どおりに発火するか              |
-| 常時実行 | `ci-links`     | リンク切れ                 | 常に（参照先の移動・改名で壊れる）               | Markdown の相対リンクの参照先が実在するか                                      |
-| 常時実行 | `ci-claude-md` | CLAUDE.md 文字数           | 常に（CLAUDE.md 自体が docs と判定される）       | CLAUDE.md と `@` import 先の合計が上限内か                                     |
-| 全体     | `ci-common`    | コーディング規約（ESLint） | `docs/` と直下 `*.md` **以外**に変更あり         | 規約違反・import の秩序・バグを生みやすい書き方                                |
-| 全体     | `ci-common`    | 未使用検出（knip）         | `docs/` と直下 `*.md` **以外**に変更あり         | 使われていない export・ファイル・依存パッケージ                                |
-| 全体     | `ci-common`    | 依存の脆弱性               | `docs/` と直下 `*.md` **以外**に変更あり         | npm 依存を全階層舐め、high 以上の脆弱性で落とす                                |
-| アプリ   | `ci-app`       | 型検査（tsc）              | `app/` に変更あり                                | アプリの型エラー                                                               |
-| アプリ   | `ci-app`       | 単体テスト（vitest）       | `app/` に変更あり                                | アプリの単体テストと、アーキテクチャ規約テスト（レイヤ依存・循環依存・凝集度） |
-| CDK      | `ci-cdk`       | スナップショット（vitest） | `infra/` に変更あり                              | 合成した CloudFormation テンプレート全体の意図しない差分                       |
-| CDK      | `ci-cdk`       | 個別プロパティ（vitest）   | `infra/` に変更あり                              | 暗号化設定・アラーム有無など、リソース単位の必須プロパティ                     |
-| 検査外   | `cdk-diff`     | `cdk diff`                 | `app/` または `infra/` に変更あり                | 既存リソースの意図しない置換・削除（ゲートには繋がない判断材料）               |
+| 分類     | ジョブ            | 検査（ツール）             | 実行条件（変更パス）                                  | 何を見るか                                                                     |
+| -------- | ----------------- | -------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 常時実行 | `ci-format`       | 整形（prettier）           | 常に（`.md` も整形対象）                              | `.md` を含む全ファイルの整形崩れ                                               |
+| 常時実行 | `ci-hooks`        | policy hook（node:test）   | 常に（発火対象を `docs/policy/*.md` が宣言する）      | ポリシーを読み込む hook が、`applies-to` の宣言どおりに発火するか              |
+| 常時実行 | `ci-links`        | リンク切れ                 | 常に（参照先の移動・改名で壊れる）                    | Markdown の相対リンクの参照先が実在するか                                      |
+| 常時実行 | `ci-claude-md`    | CLAUDE.md 文字数           | 常に（CLAUDE.md 自体が docs と判定される）            | CLAUDE.md と `@` import 先の合計が上限内か                                     |
+| 常時実行 | `ci-rules`        | Rule 文字数                | 常に（Rule だけを直す PR でも上限を破りうる）         | `.claude/rules/*.md` の文字数が上限内か                                        |
+| 常時実行 | `ci-descriptions` | description 文字数         | 常に（Skill・agent だけを直す PR でも上限を破りうる） | Skill・agent の description の合計と1件の文字数が上限内か                      |
+| 常時実行 | `ci-workflows`    | workflow 検査              | 常に（workflow だけを直す PR でも決まりを破りうる）   | Action の SHA 固定・最上位の `permissions`・`run:` への式の直接埋め込み        |
+| 全体     | `ci-common`       | コーディング規約（ESLint） | `docs/` と直下 `*.md` **以外**に変更あり              | 規約違反・import の秩序・バグを生みやすい書き方                                |
+| 全体     | `ci-common`       | 未使用検出（knip）         | `docs/` と直下 `*.md` **以外**に変更あり              | 使われていない export・ファイル・依存パッケージ                                |
+| 全体     | `ci-common`       | 依存の脆弱性               | `docs/` と直下 `*.md` **以外**に変更あり              | npm 依存を全階層舐め、high 以上の脆弱性で落とす                                |
+| アプリ   | `ci-app`          | 型検査（tsc）              | `app/` に変更あり                                     | アプリの型エラー                                                               |
+| アプリ   | `ci-app`          | 単体テスト（vitest）       | `app/` に変更あり                                     | アプリの単体テストと、アーキテクチャ規約テスト（レイヤ依存・循環依存・凝集度） |
+| CDK      | `ci-cdk`          | スナップショット（vitest） | `infra/` に変更あり                                   | 合成した CloudFormation テンプレート全体の意図しない差分                       |
+| CDK      | `ci-cdk`          | 個別プロパティ（vitest）   | `infra/` に変更あり                                   | 暗号化設定・アラーム有無など、リソース単位の必須プロパティ                     |
+| 検査外   | `cdk-diff`        | `cdk diff`                 | `app/` または `infra/` に変更あり                     | 既存リソースの意図しない置換・削除（ゲートには繋がない判断材料）               |
 
 ## マージ可否は `cicd-gate` 1つだけで決める
 

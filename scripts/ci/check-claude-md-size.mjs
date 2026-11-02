@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // 責務: リポジトリ内の各 CLAUDE.md が文字数上限に収まっているかを検査する。
-//   上限と「超えたらどうするか」は docs/policy/policy-driven-development-policy.md が正典で、
-//   ここはその判定だけを担う。CLAUDE.md は毎セッション全文が読まれるため、文字数がそのまま
-//   恒久的なコンテキスト消費になる（Issue #247）。
+//   上限の値はこのファイルの CHARACTER_LIMIT が正典。超えたらどうするかは
+//   docs/policy/policy-driven-development-policy.md が正典で、ここはその判定だけを担う。
+//   CLAUDE.md は毎セッション全文が読まれるため、文字数がそのまま恒久的なコンテキスト消費になる
+//   （Issue #247）。
 //
 // 判定ロジックはこのファイル1ヶ所にしか置かない。ターン末ゲート（.claude/hooks/turn-end-gate.mjs）と CI の2経路から呼ばれる。
 
@@ -10,6 +11,7 @@ import { existsSync, readFileSync, statSync } from 'fs'
 import { dirname, join, resolve, relative, sep } from 'path'
 import { fileURLToPath } from 'url'
 
+import { countCharacters } from './count-characters.mjs'
 import { listWorkingTreeFiles } from './list-working-tree-files.mjs'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -181,16 +183,6 @@ function extractImportTargets(source) {
   }
 
   return importTargets
-}
-
-/**
- * `wc -m` と同じ数え方で文字数を返す（コードポイント単位。UTF-16 の符号単位ではない）。
- *
- * @param {string} text 数える対象の全文
- * @returns {number} 文字数
- */
-function countCharacters(text) {
-  return [...text].length
 }
 
 main()

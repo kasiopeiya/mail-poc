@@ -86,20 +86,22 @@ auto-merge を外すのは、残っていると、解いた push の CI が通�
 
 2 で拾う `ai-fixable` の Issue の一部は、週次スクリプトが人手を介さず自動起票したものである。Policy・Rule を変えたときに違反になった既存コードは、コードに差分が出ないので通常のレビューに掛からない。それを拾う専用の週次チェックが2本ある。
 
-| スクリプト                                    | 対象                                                               | 起票ラベル               |
-| --------------------------------------------- | ------------------------------------------------------------------ | ------------------------ |
-| `scripts/ci/doc-consistency-weekly-issue.mjs` | `docs/` 全体（`/doc-consistency`）                                 | `doc-consistency-weekly` |
-| `scripts/ci/code-policy-weekly-issue.mjs`     | `app/`（`/code-review` の「決まりどおりか」「設計の形」の2レンズ） | `code-policy-weekly`     |
+| スクリプト                                | 対象                                                                                                                                                      | 起票ラベル           |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `scripts/ci/doc-audit-weekly-issue.mjs`   | `docs/`・`.claude/` の Skill・agent・Rule・ルートの `CLAUDE.md`（`/doc-consistency`）。毎回読まれる文書が対象に含まれる週は `/slim-always-loaded-docs` も | `doc-audit-weekly`   |
+| `scripts/ci/code-policy-weekly-issue.mjs` | `app/`（`/code-review` の「決まりどおりか」「設計の形」の2レンズ）                                                                                        | `code-policy-weekly` |
 
-`scripts/ci/doc-consistency-weekly-issue.mjs` の設計判断：
+`scripts/ci/doc-audit-weekly-issue.mjs` の設計判断：
 
 - **起票だけを GitHub Actions（`doc-consistency-weekly.yml`）が行い、実行そのものは人間か Auto Programmer が行う**：このテンプレートは、GitHub Actions で Claude Code を使えないプロジェクトへの配布も前提にしている。実行そのものを Actions に持たせると、そうしたプロジェクトでは仕組みごと動かない。
-- **専用ラベル（`doc-consistency-weekly`）が付いた open な Issue が既にあれば起票しない**：処理待ちの週次 Issue は1件で足りる。起点を前回処理以降の変更に絞れば、処理が1週遅れても次回でその分を追いつけるため、未処理のまま複数積み上げる必要が無い。
-- **起点は、実行結果コメントが付いた直近の週次 Issue の HEAD SHA から今回の HEAD までに変わった `docs/**/*.md` にする**：2文書間の重複・矛盾は、どちらかが変わったときにしか生まれない。最初に1回全体を見て、以後の変更を途切れずに起点へつなげれば、すべての組み合わせを一度は見たことになる。該当する週次 Issue が無い、または SHA を読み取れない場合だけ、これまでどおり `docs/` 全体を対象にする。
+- **専用ラベル（`doc-audit-weekly`）が付いた open な Issue が既にあれば起票しない**：処理待ちの週次 Issue は1件で足りる。起点を前回処理以降の変更に絞れば、処理が1週遅れても次回でその分を追いつけるため、未処理のまま複数積み上げる必要が無い。
+- **起点は、実行結果コメントが付いた直近の週次 Issue の HEAD SHA から今回の HEAD までに変わった `docs/**/*.md` と、`.claude/` の4つ（`skills`・`agents`・`rules`・`rule-bodies`）の `*.md` と、ルートの `CLAUDE.md` にする**：2文書間の重複・矛盾は、どちらかが変わったときにしか生まれない。最初に1回全体を見て、以後の変更を途切れずに起点へつなげれば、すべての組み合わせを一度は見たことになる。該当する週次 Issue が無い、または SHA を読み取れない場合だけ、その範囲の全体を対象にする。`.claude/` を加えたのは、同じ行が3ファイル以上に写った箇所の多くが `.claude/` にあったためである。`CLAUDE.md` を加えたのは、過去のスリム化で消えた行の多くが、他の文書と同じ内容だったためである。
+- **毎回読まれる文書の減量チェック（`/slim-always-loaded-docs`）は、この週次 Issue に相乗りさせる**：対象は `CLAUDE.md`・`docs/project-context/project-claude.md`・`docs/policy-hub.md`・`docs/design-hub.md` の4本で、起点の差分にこの4本のどれかがある週だけ、変わったものを対象にして載せる。走査範囲の全体を対象にすると起票スクリプトが判定した週は、理由を問わず4本すべてを対象にして載せる。上限内なら AI が安易に書き足すので、足された週は必ず差分に出る。変わっていない週に見直すと、決着済みの行を蒸し返す。判定の範囲は、変わった文書の全文にする（変わった行だけでは、すでに増えた分を拾えない）。載せる週は、題・対応方針・タスク一覧・完了条件・実装フローのすべてに `/slim-always-loaded-docs` を並べる。
+- **相乗りでも見落としにならない**：減量チェックが失敗して週次 Issue が open のまま残れば、翌週の `/doc-consistency` も起票されない。それでも失うのは遅れだけである。両方のチェックが同じ「前回処理した週次 Issue の SHA」を起点にするので、再開した回に、止まっていた間の変更をまとめて見るからである。減量 Skill は実行中に人間の判断を待たないので、止まる原因にもなりにくい。別ワークフロー・別ラベルにしないのは、新設と、起点の引き継ぎの二重化になるためである。
 
 `scripts/ci/code-policy-weekly-issue.mjs` の設計判断：
 
-- **docs 用の週次 Issue とは別の Issue・別ラベルにする**：1つの Issue に両方載せると、どちらかが未処理のまま残ったとき「open なら起票しない」という決まり（両スクリプト共通）で両方のチェックが止まる。ラベルと Issue を分ければ、一方の遅延がもう一方を妨げない。
+- **docs 用の週次 Issue とは別の Issue・別ラベルにする**：1つの Issue に両方載せると、どちらかが未処理のまま残ったとき「open なら起票しない」という決まり（両スクリプト共通）で両方のチェックが止まる。ラベルと Issue を分ければ、一方の遅延がもう一方を妨げない。docs 用で相乗りが許されるのは、起点の差分を持つからである。毎週全体を見る code-policy にはこの性質が無い。
 - **起点を計算せず、毎週 `app/` 全体を対象にする**：docs 用は前回処理以降の差分に絞るが、これは差分計算の実装コスト（処理済み Issue の探索・HEAD SHA 記録・読み戻し）と引き換えに、文書数が増えても1回あたりのチェック量を抑える対策である。コード側の対象は当面小規模で、差分計算を持たなくても週1回全体を見るコストが見合う。実測の所要時間が閾値を超えたら、差分計算への切り替えを検討する。
 - **`samples/` は対象にしない**：参照実装で AI が書き換えられない（リポジトリルートの README「変更してはならないパス」）ため、対象に含めても指摘を直せない。
 - **レンズは「決まりどおりか」「設計の形」の2本に絞る**：重複コード（SSoT違反）・単一責任・アプリ設計ポリシー準拠は「設計の形」レンズの担当で、「決まりどおりか」には含まれない。バグ探し・セキュリティ・テストの3レンズは対象外にする。既存コードの潜在バグ・テストの穴を狙う観点は、Policy 変更と無関係に前週と同じ指摘を繰り返しやすいためである。
@@ -201,7 +203,19 @@ AI 専用 clone と実行記録は `~/dev/auto-programmer/` の下に置かれ�
 
 ## 1件を終えたときの読み上げ
 
-Issue 1件の締めの表示に合わせて、macOS では `say`、Windows では `powershell.exe -NoProfile` から System.Speech（Windows 標準の音声合成）の `SpeechSynthesizer` で、次の1文を読み上げる。声は指定せず、OS の既定の声に任せる。
+既定ではオフで、鳴らない。環境変数 `AUTO_PROGRAMMER_ENABLE_SPEECH=1` を付けたときだけ、Issue 1件の締めの表示に合わせて、macOS では `say`、Windows では `powershell.exe -NoProfile` から System.Speech（Windows 標準の音声合成）の `SpeechSynthesizer` で、次の1文を読み上げる。声は指定せず、OS の既定の声に任せる。
+
+鳴らしたいかは人によって違い、git で追跡する `config.mjs` には書けないので、環境変数で切り替える。
+
+```bash
+# 毎回付ける
+AUTO_PROGRAMMER_ENABLE_SPEECH=1 npm run auto-programmer
+
+# シェルの設定（~/.zshrc など）に書く
+export AUTO_PROGRAMMER_ENABLE_SPEECH=1
+```
+
+使える値は `1` だけ（付けない・空はオフ）。`true` など別の値を付けると、鳴らない理由に気づけないまま終わるのを防ぐため、Issue を拾う前にエラーで止まる。
 
 ```
 issue <番号>、<結果の言葉>。<タイトル>
@@ -218,6 +232,7 @@ issue <番号>、<結果の言葉>。<タイトル>
 
 次の場合は読み上げない。
 
+- 環境変数 `AUTO_PROGRAMMER_ENABLE_SPEECH` を付けていない
 - macOS と Windows 以外の OS
 - 衝突した PR を解かせる流れ。Issue を終えることではないため
 
@@ -251,7 +266,7 @@ tail -3 ~/dev/auto-programmer/runs.jsonl | jq .
 
 直すのは次のものだけ。
 
-- **`config.mjs`**：上の表の値をその環境のものへ書き換える。書き換えないと `npm run move-issue-card` はボード未設定とみなして何もしない。テンプレートの同期（`scripts/sync-template.sh`）は `config.mjs` を上書きしないので、同期で `maxConsecutiveIdleWaits` のような新しいキーが増えたときは手で足す（無いと起動時に落ちる）。逆に `baseBranch` のように使われなくなったキーは残っても害が無いが、値を変えても何も起きないので消してよい。clone の番号とロックの置き場は既存の `workspaceDir` から導くので、同期した後も古い `config.mjs` のまま、キーを足さずに並べて動かせる
+- **`config.mjs`**：上の表の値をその環境のものへ書き換える。書き換えないと `npm run move-issue-card` はボード未設定とみなして何もしない。テンプレートの同期（`scripts/sync-template.sh`）は `config.mjs` を上書きしないので、同期で `maxConsecutiveIdleWaits` のような新しいキーが増えたときは手で足す（無いと起動時に落ちる）。逆に `baseBranch` のように使われなくなったキーは残っても害が無いが、値を変えても何も起きないので消してよい。clone の番号とロックの置き場は既存の `workspaceDir` から導くので、同期した後も古い `config.mjs` のまま、キーを足さずに並べて動かせる。読み上げのキー `enableSpeechEnvValue` も同期では届かず、古い `config.mjs` のままではオフで動く（`AUTO_PROGRAMMER_ENABLE_SPEECH=1` を付けても鳴らない）。オンにしたいときは、`config.mjs` の `config` に `enableSpeechEnvValue: process.env.AUTO_PROGRAMMER_ENABLE_SPEECH,` を手で足す
 - **`package.json`**：`auto-programmer`・`move-issue-card`・`close-issues` のスクリプトを写す
 - **`ci.workflowFile` のワークフロー**：`branchPrefix` を設定したときだけ、push トリガー（`on.push.branches`）に同じ接頭辞を足す（例：`'st2/**'`）。足さないと CI が走らず、PR も作られない。接頭辞は既存のブランチ（`main2` など）と同じ名前にできない（git がその下にブランチを作れないので、起動時に止まる）
 - **`.claude/skills/auto-dev/`・`.claude/skills/auto-fix-ci/`・`.claude/skills/auto-resolve-conflict/`・`.claude/skills/issue-check/`**：そのリポジトリの `.claude/skills/` へ写す（`/auto-dev`・`/auto-fix-ci`・`/auto-resolve-conflict` が無いと手順が無い。`/issue-check` は `.claude/agents/issue-auditor-agent/` と、割るときに使う `.claude/skills/issue-split/` も要る。`/issue-split` は正典として `.claude/skills/to-issues/`・`.claude/skills/quick-issue/` を参照するので、これも写す。初回の検査で外部依存の制約を調べるために `.claude/agents/premise-checker-agent/` も要る。これは一次資料の定義を `.claude/skills/origin-search/` から読むので、これも写す。`issue-auditor-agent` は過去の決定を引く手順を `.claude/skills/past-decision-search/` から読むので、これも写す）

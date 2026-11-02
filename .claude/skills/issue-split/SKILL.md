@@ -1,6 +1,6 @@
 ---
 name: issue-split
-description: 大きすぎる／複数の関心事を含む既存 GitHub Issue を sub-issue に割り、親を umbrella に作り替える。「issue-split」「issueを分割して」「issueをsub-issueに割って」と指示されたとき。
+description: 大きすぎる／複数の関心事を含む既存 GitHub Issue を sub-issue に割る。「issue-split」「issueを分割して」「issueをsub-issueに割って」と指示されたとき。
 argument-hint: '<Issue番号> [--from-issue-check]'
 allowed-tools: AskUserQuestion, Bash, Read, Edit, Write
 ---
@@ -76,7 +76,7 @@ Issue が触れる領域の設計書（`docs/design-hub.md` 経由）とポリ�
 
 分割案を、依存順（ブロッカーが先）に起票する。`gh issue create` には `--assignee @me` を付ける（Auto Programmer は候補を `assignee:@me` で探すため）。
 
-本文は `/quick-issue` の `<issue-template>` に従う。人間が上から3節（「この変更が必要な理由」「対応方針」「タスク一覧」）を読むだけで、何の話で結局何をするのかが分かる型だからである。
+本文は `/quick-issue` の `<issue-template>` に従う。人間が上から3節（「この変更が必要な理由」「対応方針」「タスク一覧」）を読むだけで、何の話で結局何をするのかが分かる型だからである。タスクの書き方は、書く前に `/quick-issue` の「本文の組み立て」を Read して従う。
 
 分割ではそこに1節を足し、3節を落とす。足す節は「完了条件」の直後に置き、上の3節を動かさない。
 
@@ -114,25 +114,13 @@ Issue が触れる領域の設計書（`docs/design-hub.md` 経由）とポリ�
 
 ## Phase 5: sub-issue として紐付ける
 
-GraphQL の形は worktree で動くセッションのガードに拒否されるので、子ごとに REST で紐づける。
-
-```bash
-gh api repos/<owner>/<repo>/issues/<子の番号> --jq .id
-```
-
-```bash
-gh api --method POST repos/<owner>/<repo>/issues/<親の番号>/sub_issues -F sub_issue_id=<子のデータベース ID>
-```
+[`/link-root-issue`](../link-root-issue/SKILL.md) の SKILL.md を Read して、「2-3. 紐づける」のコマンドで、子ごとに紐づける。
 
 紐付けに失敗した子があれば、その番号を報告に残す。**成功した分をロールバックしない**——親本文のリンク一覧（Phase 6）があれば、紐付けが無くても親子は辿れる。
 
 ## Phase 6: 親を umbrella に作り替える
 
-`gh issue view <番号> --json body --jq .body` でスクラッチパッドに書き出し、Read → Edit で該当セクションだけを差し替えてから反映する。
-
-```bash
-gh issue edit <番号> --body-file <スクラッチパッド>/issue-<番号>.md
-```
+[issue-update](../../rule-bodies/issue-update.md) を Read して、「本文を取得して書き戻す」に従い、該当セクションだけを差し替える。
 
 - **タスク一覧**：sub-issue へのリンク一覧（`- [ ] #123 タイトル`）
 - **完了条件**：「すべての sub-issue が close されていること」
