@@ -14,7 +14,7 @@
 | 2   | 閉じ損ねた Issue を閉じる。衝突して止まった自分の PR があれば、Issue を選ぶ前にそれを解かせる（「衝突して止まった PR を解かせる」）。無ければ Ready・`ai-fixable`・自分が担当者の open Issue から着手できる1件を選ぶ。選んだ Issue のロックを取り、カードがまだ Ready かを引き直す（他のプロセスが着手中なら飛ばして次の候補へ） | このツール                                |
 | 3   | 未コミットの変更を stash へ退避して clone をデフォルトブランチの最新へ戻し、トピックブランチを作り、依存を揃える                                                                                                                                                                                                                 | このツール                                |
 | 4   | 選んだ Issue のカードを「In progress」へ動かす                                                                                                                                                                                                                                                                                   | このツール                                |
-| 5   | Issue が open な sub-issue を持てば、子を Ready に載せて 13 へ飛ぶ。持たず `issue:checked` も無ければ、clone の中で `claude -p "/issue-check #<番号>"` を起動する                                                                                                                                                                | このツール・`.claude/skills/issue-check/` |
+| 5   | Issue が open な sub-issue を持てば、子を Ready に載せて 13 へ飛ぶ。持たず、`issue:checked` も週次ラベルも無ければ、clone の中で `claude -p "/issue-check #<番号>"` を起動する                                                                                                                                                   | このツール・`.claude/skills/issue-check/` |
 | 6   | やる必要があるかと、対応方針がポリシーに合うかを確かめ、判定をラベル・state・本文へ書き戻す。1つの PR に収まらず割れる Issue は、`/issue-split` で sub-issue に割る。初回の検査で、本文に新しい技術要素があれば、外部依存の制約も調べる                                                                                          | `/issue-check`                            |
 | 7   | 6 で open な sub-issue ができていれば、子を Ready に載せる。続けて Issue のラベルと state を読み、子を載せたか止める理由があれば 13 へ飛ぶ                                                                                                                                                                                       | このツール                                |
 | 8   | Issue から前回の `needs-human-check` を外し、clone の中で `claude -p "/auto-dev <番号>"` を起動する                                                                                                                                                                                                                              | `.claude/skills/auto-dev/`                |
@@ -39,14 +39,14 @@
 - **カードが Todo・Ready 以外の列にある**：着手した後（In progress・In Review・Done）の子を Ready へ戻すと、同じ Issue をもう一度拾う。ボードに無い子は載せる
 - **対象リポジトリ（`repository`）の外にある**：2 は対象リポジトリの Issue しか拾わないので、載せても拾われない
 
-5 で `issue:checked` が付いていれば、6 を飛ばして 7 へ進む。監査の後に前提が崩れていれば、9 で `/auto-dev` が離脱する。
+5 で `issue:checked` か週次ラベル（`doc-audit-weekly`・`code-policy-weekly`）が付いていれば、6 を飛ばして 7 へ進む。週次の Issue は本文に変更対象が無く、見積もりが 0 行になるので、監査しても判定は変わらない。監査の後に前提が崩れていれば、9 で `/auto-dev` が離脱する。
 
-6 で外部依存の制約を調べるのは、`issue:checked` が無く、本文に出た外部の製品・サービス・ツールの名前が `docs/adr/`・`docs/design/`・各 `package.json` のどこにも無い Issue だけである。Plan を通らない Issue の前提の誤りを、実装の前に拾うためである。人間にまだ示していない制約のうち、対応方針を確実に実行できなくするものが見つかれば、判定は人間判断になり、7 で止まる。そうでない制約は、本文へ追記して監査を続ける。調べられなかったときは、Issue にコメントを残して監査を続ける。
+6 で外部依存の制約を調べるのは、`issue:checked` も週次ラベルも無く、本文に出た外部の製品・サービス・ツールの名前が `docs/adr/`・`docs/design/`・各 `package.json` のどこにも無い Issue だけである。Plan を通らない Issue の前提の誤りを、実装の前に拾うためである。人間にまだ示していない制約のうち、対応方針を確実に実行できなくするものが見つかれば、判定は人間判断になり、7 で止まる。そうでない制約は、本文へ追記して監査を続ける。調べられなかったときは、Issue にコメントを残して監査を続ける。
 
 7 で実装へ進まないのは、次のときだけである。`/issue-check` が「方針差し替え」に倒した Issue は、差し替わった本文のまま 8 へ進む。
 
 - open な sub-issue ができた
-- `issue:checked` が貼られていない（判定が書き戻されていない）
+- `issue:checked` が貼られていない（判定が書き戻されていない。週次ラベルの Issue は除く）
 - `needs-human-decision` か `ready-for-human` が付いた
 - `ai-fixable` が外れた
 - close された
@@ -153,7 +153,7 @@ npm run auto-programmer
 
 フィールド ID・選択肢 ID は設定に持たせない。表記から実行時に引き直す。各 Status が何を意味するかは [issue-policy](../../docs/policy/issue-policy.md)「ボードの Status の意味」が定める。
 
-この設定は `scripts/move-issue-card.mjs`（`npm run move-issue-card -- <Issue番号>`）も共有する。AI が着手の直前に打ってカードを着手中へ動かすスクリプトで、ボードの設定を2か所に持たないためである。`repository` が今いるリポジトリと違えばボード未設定とみなし、警告だけ出して終了コード 0 で終わる。
+この設定は `scripts/move-issue-card.mjs`（`npm run move-issue-card -- <Issue番号>`）も共有する。AI が着手の直前に打ってカードを着手中へ動かすスクリプトで、ボードの設定を2か所に持たないためである。`repository` が今いるリポジトリと違えばボード未設定とみなし、警告だけ出して終了コード 0 で終わる。`scripts/decide-issue-start.mjs`（`npm run --silent decide-issue-start -- <Issue番号>`）も、対象ラベル `targetIssueLabel` をここから読む。「issue N 対応して」で、AI が最初の Skill の前に打つ。着手するか止めるかを決め、1行目の先頭の語で返す。読む Issue は `repository` ではなく、今いるリポジトリのものである。
 
 トピックブランチを切る元も設定に持たせない。GitHub に設定されたデフォルトブランチを、このツールと `/auto-dev`・`/auto-fix-ci`・`/pr-body` がその場で引く。PR の作成先は `pipeline.yml` がデフォルトブランチに決めるので、設定で別の値を持てると、切る元と PR の作成先が食い違うためである。
 
@@ -267,7 +267,7 @@ tail -3 ~/dev/auto-programmer/runs.jsonl | jq .
 直すのは次のものだけ。
 
 - **`config.mjs`**：上の表の値をその環境のものへ書き換える。書き換えないと `npm run move-issue-card` はボード未設定とみなして何もしない。テンプレートの同期（`scripts/sync-template.sh`）は `config.mjs` を上書きしないので、同期で `maxConsecutiveIdleWaits` のような新しいキーが増えたときは手で足す（無いと起動時に落ちる）。逆に `baseBranch` のように使われなくなったキーは残っても害が無いが、値を変えても何も起きないので消してよい。clone の番号とロックの置き場は既存の `workspaceDir` から導くので、同期した後も古い `config.mjs` のまま、キーを足さずに並べて動かせる。読み上げのキー `enableSpeechEnvValue` も同期では届かず、古い `config.mjs` のままではオフで動く（`AUTO_PROGRAMMER_ENABLE_SPEECH=1` を付けても鳴らない）。オンにしたいときは、`config.mjs` の `config` に `enableSpeechEnvValue: process.env.AUTO_PROGRAMMER_ENABLE_SPEECH,` を手で足す
-- **`package.json`**：`auto-programmer`・`move-issue-card`・`close-issues` のスクリプトを写す
+- **`package.json`**：`auto-programmer`・`move-issue-card`・`decide-issue-start`・`close-issues` のスクリプトを写す
 - **`ci.workflowFile` のワークフロー**：`branchPrefix` を設定したときだけ、push トリガー（`on.push.branches`）に同じ接頭辞を足す（例：`'st2/**'`）。足さないと CI が走らず、PR も作られない。接頭辞は既存のブランチ（`main2` など）と同じ名前にできない（git がその下にブランチを作れないので、起動時に止まる）
 - **`.claude/skills/auto-dev/`・`.claude/skills/auto-fix-ci/`・`.claude/skills/auto-resolve-conflict/`・`.claude/skills/issue-check/`**：そのリポジトリの `.claude/skills/` へ写す（`/auto-dev`・`/auto-fix-ci`・`/auto-resolve-conflict` が無いと手順が無い。`/issue-check` は `.claude/agents/issue-auditor-agent/` と、割るときに使う `.claude/skills/issue-split/` も要る。`/issue-split` は正典として `.claude/skills/to-issues/`・`.claude/skills/quick-issue/` を参照するので、これも写す。初回の検査で外部依存の制約を調べるために `.claude/agents/premise-checker-agent/` も要る。これは一次資料の定義を `.claude/skills/origin-search/` から読むので、これも写す。`issue-auditor-agent` は過去の決定を引く手順を `.claude/skills/past-decision-search/` から読むので、これも写す）
 

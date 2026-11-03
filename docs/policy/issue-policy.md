@@ -5,6 +5,7 @@ hook:
       'scripts/setup-labels.sh',
       'scripts/auto-programmer/**/*.mjs',
       'scripts/move-issue-card.mjs',
+      'scripts/decide-issue-start.mjs',
       'scripts/auto-programmer/README.md',
       'scripts/ci/doc-audit-weekly-issue.mjs',
       'scripts/ci/code-policy-weekly-issue.mjs',
@@ -14,6 +15,7 @@ hook:
       '.github/workflows/add-opus-label.yml',
       '.claude/agents/issue-auditor-agent/*.md',
       '.claude/skills/quick-issue/**/*.md',
+      '.claude/skills/broken-window-issue/**/*.md',
       '.claude/skills/link-root-issue/**/*.md',
       'docs/project-context/issue-destinations.md',
       '.claude/skills/to-issues/**/*.md',
@@ -92,7 +94,7 @@ AIエージェントが、Issue を起票する・Issue のラベルを付け替
 | `needs-human-check`                      | 無人実行が問題で止まった。人間に確かめてほしい                                                                | 下の「無人実行が止まったら `needs-human-check` を付ける」の条件に当たるとき                                                                                                                                                                                                   |
 | `phase`                                  | Issue 階層の最上位の常設 Issue（ルート Issue）                                                                | ルート Issue にだけ付ける（3択の例外）                                                                                                                                                                                                                                        |
 | `requirement`                            | 要件定義書のレビュー指摘に起因する Issue                                                                      | `/requirements-review` が起票するとき、ほかのラベルに重ねる                                                                                                                                                                                                                   |
-| `doc-audit-weekly`・`code-policy-weekly` | 週次ワークフローが起票した Issue を見分ける専用の印                                                           | 週次スクリプトが `ai-fixable` と一緒に付ける。ラベルの当否は、着手前の `/issue-check` が見る                                                                                                                                                                                  |
+| `doc-audit-weekly`・`code-policy-weekly` | 週次ワークフローが起票した Issue を見分ける専用の印                                                           | 週次スクリプトが `ai-fixable` と一緒に付ける                                                                                                                                                                                                                                  |
 | `dev-deploy-failure`                     | dev への deploy が失敗した通知の Issue                                                                        | `deploy-dev.yml` が起票するとき（3択の例外）                                                                                                                                                                                                                                  |
 
 PR に付く `needs-human-review` などのラベルの意味は `pr-review-policy.md` が持つ。このポリシーが扱うのは、そのラベルを付けて起票される通知の Issue（下の「3択の例外」）だけである。
@@ -231,7 +233,7 @@ PR に付く `needs-human-review` などのラベルの意味は `pr-review-poli
 
 ## 3択の例外は、専用のラベルで扱いが決まっている Issue に限る
 
-**3択**とは、`ai-fixable`・`needs-human-decision`・`ready-for-human` の3つをいう。起票する Issue には、このうちどれか1つだけを必ず付ける（AI が見つけた問題を `/quick-issue` で起票するときは、加えて `broken-window` を付ける）。どれも付かない Issue は、AI の着手からも、人間の判断や作業からも漏れて、誰の目にも触れなくなる。
+**3択**とは、`ai-fixable`・`needs-human-decision`・`ready-for-human` の3つをいう。起票する Issue には、このうちどれか1つだけを必ず付ける（AI が本筋外の問題を見つけて起票するときは、加えて `broken-window` を付ける）。どれも付かない Issue は、AI の着手からも、人間の判断や作業からも漏れて、誰の目にも触れなくなる。
 
 例外は、3択のどれも（`broken-window` も）付けない Issue で、**専用のラベルで扱いが決まっているものだけ**である。
 
@@ -240,7 +242,7 @@ PR に付く `needs-human-review` などのラベルの意味は `pr-review-poli
 
 これらは専用の経路（常設・自動 close・人間の確認）で扱う。3択を付けると、`/issue-check` や Auto-Programmer（ボードの `Ready` の Issue を1件ずつ拾い、AI に実装させるツール。`scripts/auto-programmer/`）が拾って空回りし、専用の経路と二重に扱われる（#996）。
 
-**umbrella の親は3択の例外にしない。** `/issue-regroup` が立てる子への入口の親も、`/to-issues` のまとめ用の親と同じく `ai-fixable` を付ける。`tracking-issue` は、親の親が `phase` のときだけ重ねる（`/to-issues` のまとめ用の親は常に第2階層なので常に重ねる）。子が open な間は `/issue-check` が飛ばし、子が全部 close されたら完了条件を見て閉じるので、空回りしない（#996）。親から `ai-fixable` を外さないのは、Auto-Programmer が `ai-fixable` のカードだけを拾い、拾った親の子を Ready に載せて引き継ぐからである。外すと親が拾われず、引き継ぎが止まる。
+**umbrella の親は3択の例外にしない。** `/issue-regroup` が立てる子への入口の親も、`/to-issues` のまとめ用の親と同じく `ai-fixable` を付ける。`tracking-issue` は、親の親が `phase` のときだけ重ねる。子が open な間は `/issue-check` が飛ばし、子が全部 close されたら完了条件を見て閉じるので、空回りしない（#996）。親から `ai-fixable` を外さないのは、Auto-Programmer が `ai-fixable` のカードだけを拾い、拾った親の子を Ready に載せて引き継ぐからである。外すと親が拾われず、引き継ぎが止まる。
 
 ## ボードの Status の意味
 
