@@ -523,44 +523,68 @@ flowchart LR
 
 ### 業務フロー図
 
+**① 送信依頼の受付**：受け付けたかどうかだけを返す。抑止リストはここでは見ない（BR-01）。
+
 ```mermaid
 sequenceDiagram
     autonumber
     participant U as 🏢 利用システム
     participant S as 📦 メール配信基盤
-    participant D as 📨 配信サービス
-    participant M as 📬 受信側のメールサービス
-    participant R as 👤 受信者
 
     U->>S: 送信依頼（IO-01）
     alt 依頼に不備がある
         S-->>U: 受付失敗（IO-02）
     else 依頼に不備が無い
         S-->>U: 受け付けた（IO-02）
-        alt 送る時点で宛先が抑止リストにある（BR-01）
-            Note over S: 送らない<br/>送信結果「抑止のため送らない」を記録する（BR-13）
-        else 宛先が抑止リストに無い
-            S->>D: 通知メール
-            alt 配信サービスが受け付けない
-                Note over S: 送信結果「配信サービスが受け付けない」を記録する（BR-13）
-            else 配信サービスが受け付けた
-                Note over S: 送信結果「送った」を記録する（BR-13）
-                D->>M: 通知メール
-                M->>R: 通知メール（IO-03）
-                R-->>M: 迷惑メールの報告（報告したとき）
-                M-->>D: 受け取り・バウンス・苦情
-                D->>S: 配信結果の通知（IO-04）
-                alt 配信成功
-                    Note over S: 連続回数を0に戻す（BR-04）
-                else ハードバウンス・苦情
-                    Note over S: 抑止リストに載せる（BR-02）
-                else ソフトバウンス（数える：宛先が原因で、最後に届いた後に送ったメール）
-                    Note over S: 連続回数に1を足す（BR-04）<br/>2回以上かつ14日以上なら抑止リストに載せる（BR-03）
-                else ソフトバウンス（数えない：中身が原因、または届いた後に来たもの）
-                    Note over S: 数えない（BR-04）
-                end
-            end
+        Note over S: ②へ進む
+    end
+```
+
+**② 通知メールの送信**：受け付けた送信依頼1件ごとに、送信結果を1つ記録する（BR-13）。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as 📦 メール配信基盤
+    participant D as 📨 配信サービス
+    participant M as 📬 受信側のメールサービス
+    participant R as 👤 受信者
+
+    alt 送る時点で宛先が抑止リストにある（BR-01）
+        Note over S: 送信結果「抑止のため送らない」
+    else 宛先が抑止リストに無い
+        S->>D: 通知メール
+        alt 配信サービスが受け付けない
+            Note over S: 送信結果「配信サービスが受け付けない」
+        else 配信サービスが受け付けた
+            Note over S: 送信結果「送った」
+            D->>M: 通知メール
+            M->>R: 通知メール（IO-03）
         end
+    end
+```
+
+**③ 配信結果の通知の処理**：②で送った通知メールについて、配信サービスから通知を受けるたびに行う。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant R as 👤 受信者
+    participant M as 📬 受信側のメールサービス
+    participant D as 📨 配信サービス
+    participant S as 📦 メール配信基盤
+
+    R-->>M: 迷惑メールの報告（報告したとき）
+    M-->>D: 受け取り・バウンス・苦情
+    D->>S: 配信結果の通知（IO-04）
+    alt 配信成功
+        Note over S: 連続回数を0に戻す（BR-04）
+    else ハードバウンス・苦情
+        Note over S: 抑止リストに載せる（BR-02）
+    else ソフトバウンス（数える：宛先が原因で、最後に届いた後に送ったメール）
+        Note over S: 連続回数に1を足す（BR-04）<br/>2回以上かつ14日以上なら抑止リストに載せる（BR-03）
+    else ソフトバウンス（数えない：中身が原因、または届いた後に来たもの）
+        Note over S: 数えない（BR-04）
     end
 ```
 
