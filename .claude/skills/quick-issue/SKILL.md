@@ -44,11 +44,13 @@ description: 確認不要で手早く GitHub Issue を起票する。思いつ�
 ラベルの意味と付ける条件は [issue-policy](../../../docs/policy/issue-policy.md) が定める。**起票の前にこのポリシーを Read する。**
 
 - `broken-window`：AI が作業中に見つけ、その場で直さずに起票した問題にだけ付ける。条件はポリシーの「Issue に付けるラベル」表に従う
+- `human-correction`：ポリシーの「Issue に付けるラベル」表の `human-correction` の付ける条件に当たるときに、`broken-window` に重ねる
 - `ai-fixable` / `needs-human-decision` / `ready-for-human`：**必ずどれか1つだけ**を付ける。判定はポリシーの「人間が決めるべき Issue の条件」と「人間しかできない作業の条件」に従う
 - `issue:decided`：`ai-fixable` か `ready-for-human` にだけ重ねる。条件はポリシーの「人間が方針を決めたら `issue:decided` を付ける」に従う
 - `harness`：ポリシーの「`harness` を付ける条件」に当たるときに重ねる。3択のどれを付けたかとは別に決める
 - `opus`：ポリシーの「`opus` を付ける条件」の条件B・Cに当たるときに、起票時に重ねる。3択のどれを付けたかとは別に決める。条件Aは `add-opus-label.yml` が付けるので、ここでは判定しない
 - `customer-question`：ポリシーの「Issue に付けるラベル」表の `customer-question` の付ける条件に当たるときに、`needs-human-decision` に重ねる
+- `human-ai-collaboration`：ポリシーの「Issue に付けるラベル」表の `human-ai-collaboration` の付ける条件に当たるときに、`ready-for-human` に重ねる
 
 ### 人間の作業を別 Issue に切り出す
 
@@ -118,7 +120,7 @@ AI の作業と、ポリシーの「人間しかできない作業の条件」�
 
 既存の設計書を選ぶのは「既存だから」ではない。**そのファイルが間違っている・欠けているから書く**のであって、書こうとしている内容がそのファイルの扱う範囲の外なら、その行には当たらず「書き先はまだ無い」へ落ちる。
 
-書き先がまだ無いとき、設計書を勝手に新設してはならない。「人間に決めてほしいこと」の論点を「どの設計書を作って、そこに何を書くか」にする。設計書の新規作成は CLAUDE.md の開発フロー一覧で `/design` の担当であり、`ai-fixable` の Issue として AI が中身を見ずに作ると、1 Issue 分の視野しか持たない設計書が既成事実になる。
+書き先がまだ無いとき、設計書を勝手に新設してはならない。「人間に決めてほしいこと」の論点を「どの設計書を作って、そこに何を書くか」にする。設計書の新規作成は、`npm run --silent select-flow-skills` の出力で `/design` の担当であり、`ai-fixable` の Issue として AI が中身を見ずに作ると、1 Issue 分の視野しか持たない設計書が既成事実になる。
 
 </destination-rules>
 
@@ -217,7 +219,7 @@ AI の作業と、ポリシーの「人間しかできない作業の条件」�
 
 ## 実装フロー（使用するSkill）
 
-このIssueを実装する際に使う開発フローSkillを実行順に記載する。**issue番号だけで開発フローを自動追従させるための情報**なので省略しない。変更種別→Skillの対応は CLAUDE.md「開発フロー」が正典。CLAUDE.md の一覧のどの種別にも当たらない場合だけ「該当なし（直接編集）」と書く。
+このIssueを実装する際に使う開発フローSkillを実行順に記載する。**issue番号だけで開発フローを自動追従させるための情報**なので省略しない。変更種別→Skillの対応は、変更するパスで `npm run --silent select-flow-skills -- <パス>` を打った出力が正典。出力が「該当なし」の場合だけ「該当なし（直接編集）」と書く。
 
 | 順  | 変更種別       | 使用Skill   |
 | --- | -------------- | ----------- |
@@ -260,6 +262,7 @@ AI の作業と、ポリシーの「人間しかできない作業の条件」�
 - [ ] 見つかったポリシー・rules と「タスク一覧」「完了条件」を照合し、反する作業を指示していない（反していたらタスク側を直した）
 - [ ] `ai-fixable` / `needs-human-decision` / `ready-for-human` のどれか1つだけを決めた
 - [ ] ポリシーの「Issue に付けるラベル」表で `broken-window` を付けるかを決めた（当たれば `broken-window` を付けた）
+- [ ] ポリシーの「Issue に付けるラベル」表で `human-correction` を付けるかを決めた（当たれば `human-correction` を付けた）
 - [ ] ポリシーの「`harness` を付ける条件」に当たるかを決めた（当たれば `harness` を付けた）
 - [ ] ポリシーの「`opus` を付ける条件」の条件B・Cに当たるかを決めた（当たれば `opus` を付けた）
 - [ ] ポリシーの「Issue に付けるラベル」表で `customer-question` を付けるかを決めた（当たれば `customer-question` を付けた）
@@ -280,7 +283,7 @@ AI の作業と、ポリシーの「人間しかできない作業の条件」�
 gh issue create \
   --title "<タイトル>" \
   --assignee @me \
-  --label <ai-fixable|needs-human-decision|ready-for-human>[,broken-window][,issue:decided][,harness][,opus][,customer-question] \
+  --label <ai-fixable|needs-human-decision|ready-for-human>[,broken-window][,human-correction][,issue:decided][,harness][,opus][,customer-question] \
   --body "$(cat <<'EOF'
 （テンプレートの全セクションを埋めた本文）
 EOF

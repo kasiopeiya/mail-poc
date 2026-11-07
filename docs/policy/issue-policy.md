@@ -6,6 +6,8 @@ hook:
       'scripts/auto-programmer/**/*.mjs',
       'scripts/move-issue-card.mjs',
       'scripts/decide-issue-start.mjs',
+      'scripts/perf-report.mjs',
+      'scripts/perf-report-html.mjs',
       'scripts/auto-programmer/README.md',
       'scripts/ci/doc-audit-weekly-issue.mjs',
       'scripts/ci/code-policy-weekly-issue.mjs',
@@ -27,7 +29,10 @@ hook:
       '.claude/skills/doc-consistency/**/*.md',
       '.claude/skills/slim-always-loaded-docs/**/*.md',
       '.claude/skills/sre-prr/**/*.md',
+      '.claude/hooks/label-ai-filed-issue.mjs',
       '.claude/skills/auto-dev/**/*.md',
+      '.claude/skills/perf-report/**/*.md',
+      '.claude/skills/perf-report/assets/report-template.html',
       '.claude/skills/auto-fix-ci/**/*.md',
       '.claude/skills/auto-resolve-conflict/**/*.md',
       '.claude/skills/design/SKILL.md',
@@ -85,8 +90,11 @@ AIエージェントが、Issue を起票する・Issue のラベルを付け替
 | `needs-human-decision`                   | 中身を見ずには直せない。人間が1件ずつ方針を決める対象を選ぶ印                                                 | 人間が決めるべき Issue の条件のどれかに当たり、人間がまだ方針を決めていないとき                                                                                                                                                                                               |
 | `ready-for-human`                        | 方針は決まっているが、残る作業を AI が実行する手段を持たない。人間が作業する対象を選ぶ印                      | 方針が決まっていて、残る作業がすべて下の「人間しかできない作業の条件」に当たるとき                                                                                                                                                                                            |
 | `issue:decided`                          | 人間が決めるべき Issue について、人間が方針を決めた                                                           | 下の「人間が方針を決めたら `issue:decided` を付ける」の条件を満たすとき。`ai-fixable` か `ready-for-human` にだけ重ねる                                                                                                                                                       |
+| `human-ai-collaboration`                 | 人間と AI が対話しながら成果物を作る Issue                                                                    | 人間と AI が対話しながら成果物を作るとき、`ready-for-human` にだけ重ねる（例：`/elicit-requirements` で要件定義書を書く Issue）。実機確認や新しいセッションでの確認のような「確かめる」作業には付けない。起票する Skill が付ける（#1586）                                     |
 | `issue:checked`                          | `/issue-check` が一度監査した。いま妥当である保証ではない                                                     | `/issue-check` が判定を出した Issue に、判定が何であれ貼る。監査できなかった・飛ばした Issue には貼らない                                                                                                                                                                     |
 | `broken-window`                          | AI が作業中に見つけ、その場で直さずに起票した問題                                                             | AI が本筋外の問題を見つけて起票するとき（CLAUDE.md「本筋外の課題は起票する」と、それを引いて確認なしに起票するレビュー系 Skill）。人間が依頼した要望には付けない                                                                                                              |
+| `ai-filed-issue`                         | AI の Bash から起票された Issue                                                                               | `label-ai-filed-issue.mjs` が付ける。印が無いことを、人間が起票したとは読まない                                                                                                                                                                                               |
+| `human-correction`                       | 人間が AI の誤りを指摘して起票した Issue。件数の増減は AI の誤りの増減を表さない                              | CLAUDE.md「本筋外の課題は起票する」の人間からの指摘を起票するとき。`broken-window` に重ねる                                                                                                                                                                                   |
 | `harness`                                | ハーネスを変える Issue。ハーネスの手直しをプロダクト開発と分けて一覧する印                                    | 下の「`harness` を付ける条件」に当たるとき。起票する Skill が付ける                                                                                                                                                                                                           |
 | `opus`                                   | 実行セッション全体を最上位モデルで回す Issue。モデルを選ぶ人間が見る印                                        | 下の「`opus` を付ける条件」に当たるとき。3択に重ねる                                                                                                                                                                                                                          |
 | `tracking-issue`                         | ルート Issue の直下（第2階層）で子を持つ親 Issue。自分では実装せず、子に分けて進める単位                      | 子を紐づけて親にした Skill が、親にした Issue の親が `phase` のときだけ付ける。判定は親にした時点で行い、あとで階層が変わっても付け外ししない。3択に重ねる。子が全部 close されても外さない。人間が GitHub の画面で子を紐づけたときは、人間が同じ条件で付ける（#1126、#1207） |
@@ -137,6 +145,12 @@ PR に付く `needs-human-review` などのラベルの意味は `pr-review-poli
 - **条件Bは最初のコードに限る**：新しいファイルを作るたびに付けると、`opus` だらけになる。`app/` のコアドメイン（`domain/`）は条件にしない。機能1つでファイルが何個もでき、機能の Issue のほとんどに付いてしまう
 - **条件Cは新設に限る**：既存の workflow やポリシーの手直しは、置き場の判断が要らない。`.claude/` の Skill・SubAgent の新設は当たらない
 - **レビューは条件にしない**：判定型の SubAgent は定義でモデルを固定しており、メインセッションのモデルでは判定が変わらない
+
+## `human-ai-collaboration` を `ready-for-human` に重ねる理由
+
+3択が「誰が何をするか」を表すのに対し、`human-ai-collaboration` は「作業の進め方」を表す。軸が違うので、4択目にせず `ready-for-human` に重ねる。要件定義書づくりのような対話の作業は、AI が自分では着手しない点で `ready-for-human` のままでよい。ただ `ready-for-human` だけでは、人間が単独で進める作業と見分けられず、パフォーマンスレポートが共同作業を人間単独と数えてしまう。このラベルで見分ける（#1586）。
+
+`ai-fixable` には重ねない。`ai-fixable` は AI が単独で対応する分類なので、重ねると分類が食い違う。
 
 ## `tracking-issue` を3択に重ねる理由
 
@@ -199,7 +213,7 @@ PR に付く `needs-human-review` などのラベルの意味は `pr-review-poli
 
 「人間が決めた」と言えるのは、当たる条件の**すべて**について、人間が決めた発言を会話から引用できるときだけである。1つでも引用できなければ `needs-human-decision` にする。引用できる発言は、条件が人間に何を問うかで違う。
 
-- **するかしないかを問う条件**（例：不可逆・外部に出る、恒久的に保守が要る資産を新設する）：対象を具体名で示し（例：`scripts/x.mjs` とその単体テスト、`docs/old/` の削除）、人間が承認した発言。具体名で示していない物は、決めていない扱いにする。人間が見ていない物まで通さないためである
+- **するかしないかを問う条件**（例：不可逆・外部に出る、恒久的に保守が要る資産を新設する）：対象を具体名で示し（例：`scripts/x.mjs` の新設、`docs/old/` の削除）、人間が承認した発言。具体名で示していない物は、決めていない扱いにする。人間が見ていない物まで通さないためである
 - **裁定や中身を問う条件**（例：ポリシー同士が正面衝突している、書くべき設計書がまだ無い）：人間が裁定や中身そのものを述べた発言。「進めてよい」だけでは足りない
 
 人間が決めた条件は、「対応方針」に「人間が決めたこと」として1条件1行で書く（行の形は `/quick-issue`）。`needs-human-decision` に戻されずに済むのは、この行に書いた条件だけである。`/issue-check` がどの条件を差し戻しの理由から外すかの細部は、`/issue-check` の監査基準が持つ。

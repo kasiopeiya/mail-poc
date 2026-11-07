@@ -22,7 +22,7 @@
 - **質問には回答で、指示には作業で応える**：「対応して」「直して」等の明確な作業指示があるときだけ着手し、それ以外は回答だけ返す
 - **正直に振る舞う**：推測を断定せず、不確実なら「分からない」と言う。事実・推測・意見を区別し、読めば確かめられることは読んで確かめる。不可逆な操作（削除・公開・本番操作）の前は `AskUserQuestion` で確認する
 - **重要な相談は３人で議論する**：設計方針・技術選定・進め方の相談では、意見を述べる前に `/devil` を確認なしで起動する（1セッション1回まで）。現物を読めば決着する問いには使わない
-- **`AskUserQuestion` の選択肢は単体で読めるように書く**：question・label・description は本文と別パネルに出る。本文なしで選べるよう、対象を毎回名指しし、本文の略記や「上記の案」を持ち込まない。人間の質問に答えた返答では `AskUserQuestion` を出さない（パネルが開くと、同じ返答の本文が隠れる）。答えて返答を終え、選んでもらうのは返事を受けた次の返答にする
+- **`AskUserQuestion` の選択肢は単体で読めるように書く**：question・label・description は本文と別パネルに出る。本文なしで選べるよう、対象を毎回名指しし、本文の略記や「上記の案」を持ち込まない。人間の質問に答えた返答では `AskUserQuestion` を出さない（パネルが開くと、同じ返答の本文が隠れる）。答えて返答を終え、選んでもらうのは返事を受けた次の返答にする。AI から判断を聞くときも同じ。パネルの前に、問いごとの前提（なぜ生じたか・すでに決まっていること・選択肢ごとに変わること）を本文で解説し、その返答ではパネルを出さない。パネルは人間が読んだ次の返答で出す
 - **横展開して考える**：1つの変更は系全体に波及するので、修正・追加の指示では同じ対応が他にも要るか調べる。提案・確認に留めるのは、設計方針の選択など人間の判断を要するものだけ
 - **本筋外の課題は起票する（broken-window）**：次のものはその場で直さず（脱線・コンフリクトを避ける）、提案でも済ませず（提案は流れて消える）、`/broken-window-issue` で確認なしに起票する
   - 割れ窓：悪い設計・誤った意思決定・質の低いコード・放置された TODO
@@ -39,20 +39,11 @@
 仕様駆動で開発する（`docs/guide/development-flow.md`）。
 
 > [!IMPORTANT]
-> **（AI・必須）** **issue番号だけで開発フローを自動追従する**：「issue 111 対応して」と番号だけ渡されたら、`gh issue view 111` の「実装フロー（使用するSkill）」の Skill を記載順に実行する。同セクションが無ければ下の一覧で決める。実装フローの Skill が終わったら、コミット・push・`/pr-body` まで確認せずに進める。
+> **（AI・必須）** **issue番号だけで開発フローを自動追従する**：「issue 111 対応して」と番号だけ渡されたら、`gh issue view 111` の「実装フロー（使用するSkill）」の Skill を記載順に実行する。同セクションが無ければ `npm run --silent select-flow-skills -- <変更するパス>` の出力で決める。実装フローの Skill が終わったら、コミット・push・`/pr-body` まで確認せずに進める。
 >
 > 着手のコマンドを打った後、最初の Skill を起動する前に、確認なしで `npm run --silent decide-issue-start -- <番号>` を打ち、出力の1行目の指示にも確認なしで従う
 
-変更種別ごとの使用Skill（直接編集した場合／新規・大幅加筆の場合）：
-
-- 設計書：`/quick-doc-review`／`/design`
-- アプリ実装（samples/app 含む）：`/code-review`／`/code-dev`
-- CDK（samples/infra 含む）：`/cdk-review`／`/cdk-dev`
-- それ以外のコード（`scripts/`・`.claude/hooks/`・`eslint-rules/`・`.claude/skills/` 配下のスクリプト）：`/quick-code-review <パス>`／`/code-review <パス>`（パスを渡さないと `.mjs` 本体が外れる）
-- CI ワークフロー（`.github/workflows/`）：どちらも `/actions-review`
-- 要件定義書：`/quick-doc-review`／`/requirements-review`
-- ADR（`docs/adr/`）：`/quick-doc-review`／`/create-adr`
-- 上記以外の文書（ハーネスのプロンプト定義 `.claude/skills/`・`.claude/agents/`、`docs/` 配下、`CLAUDE.md`）：`/quick-doc-review`／`/doc-review`
+直接編集したファイルは、`npm run --silent select-flow-skills -- <パス>` の出力の「直接編集」の Skill でレビューする。
 
 ## Issue 作業の共通ルール
 
